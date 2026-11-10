@@ -111,33 +111,27 @@ class ModelConfig:
     MODEL_TEMPERATURE = os.getenv("MODEL_TEMPERATURE") or os.getenv(
         "VL_MODEL_TEMPERATURE"
     )
-    # 回答输出预算调整为6144 token：保留详细回答空间，同时避免8192导致模型
-    # 在已经回答完整后继续无止境扩写。真正的自然收束还由答案节点的软上限控制。
+    # 回答输出预算保留详细回答空间；模型根据提示词在内容完整处主动收束。
     # 下面参数均可在根目录 .env 中覆盖，方便不同模型按上下文窗口调节。
-    LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 6144)
-    # 普通问题的软收束长度，达到完整句/段落后主动结束，不等到模型硬上限。
-    ANSWER_SOFT_MAX_CHARS = _env_int("ANSWER_SOFT_MAX_CHARS", 3600)
-    # 明确要求详细/深入/系统讲解的问题允许展开更多，但仍然有合理上限。
-    ANSWER_DETAILED_SOFT_MAX_CHARS = _env_int(
-        "ANSWER_DETAILED_SOFT_MAX_CHARS", 6000
-    )
-    # 软上限附近如果还没有完整标点，最多再放宽这部分字符，避免截断半句话。
-    ANSWER_SOFT_STOP_GRACE_CHARS = _env_int(
-        "ANSWER_SOFT_STOP_GRACE_CHARS", 600
+    LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 32768)
+    # provider 硬截断时自动续写，避免答案停在半句话或代码块中。
+    LLM_MAX_CONTINUATIONS = _env_int("LLM_MAX_CONTINUATIONS", 1)
+    LLM_CONTINUATION_CONTEXT_CHARS = _env_int(
+        "LLM_CONTINUATION_CONTEXT_CHARS", 24000
     )
     # ==================== AI修改 结束 ====================
     # 历史消息从10条扩大到20条，约保留10轮问答，减少多轮对话遗忘。
     QUERY_HISTORY_LIMIT = _env_int("QUERY_HISTORY_LIMIT", 20)
     # 检索上下文预算从10000字符扩大到18000字符，给详细回答更多依据。
-    ANSWER_MAX_CONTEXT_CHARS = _env_int("ANSWER_MAX_CONTEXT_CHARS", 18000)
+    ANSWER_MAX_CONTEXT_CHARS = _env_int("ANSWER_MAX_CONTEXT_CHARS", 48000)
     # 历史文本设置独立上限，避免记忆扩大后挤占当前问题和回答输出空间。
-    ANSWER_MAX_HISTORY_CHARS = _env_int("ANSWER_MAX_HISTORY_CHARS", 16000)
+    ANSWER_MAX_HISTORY_CHARS = _env_int("ANSWER_MAX_HISTORY_CHARS", 24000)
     # 前端上下文进度条的展示上限，与实际模型输出预算分开控制。
-    ANSWER_CONTEXT_DISPLAY_LIMIT = _env_int("ANSWER_CONTEXT_DISPLAY_LIMIT", 40000)
+    ANSWER_CONTEXT_DISPLAY_LIMIT = _env_int("ANSWER_CONTEXT_DISPLAY_LIMIT", 80000)
     # 模型总上下文窗口；输出预算、提示词安全余量会从这里扣除后再分配资料。
-    LLM_CONTEXT_WINDOW_TOKENS = _env_int("LLM_CONTEXT_WINDOW_TOKENS", 32768)
+    LLM_CONTEXT_WINDOW_TOKENS = _env_int("LLM_CONTEXT_WINDOW_TOKENS", 262144)
     # 给系统提示词、格式开销和token估算误差预留的安全空间。
-    LLM_PROMPT_SAFETY_TOKENS = _env_int("LLM_PROMPT_SAFETY_TOKENS", 2048)
+    LLM_PROMPT_SAFETY_TOKENS = _env_int("LLM_PROMPT_SAFETY_TOKENS", 4096)
     # ==================== AI修改 结束 ====================
 
 class MinioConfig:
@@ -176,11 +170,11 @@ class MilvusConfig:
     # 主体识别集合表仍单独保留，因为它和正文切片的检索用途不同。
     milvus_item_collection = os.getenv("ITEM_COLLECTION") or "item_collection"
     # ==================== AI修改 开始 ====================
-    # 所有正文来源统一写入一张知识切片表；旧环境变量仍可指定表名，
-    # 但普通资料和教育资料不再根据来源创建不同的 chunks collection。
-    milvus_chunks_collection = os.getenv("CHUNKS_COLLECTION") or "knowledge_chunks"
-    # 保留旧配置属性作为代码兼容别名，实际值与统一正文表相同，不会创建第二张表。
+    # Graph RAG 固定使用新集合；旧 knowledge_chunks 保留作回滚和对照评测。
+    milvus_chunks_collection = "knowledge_chunks_graph"
+    # 教育专属字段不再写入主 Chunk 集合。
     education_chunks_collection = milvus_chunks_collection
+    # ==================== AI修改 结束 ====================
 
 class MongoConfig:
     """

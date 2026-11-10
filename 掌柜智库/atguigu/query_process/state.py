@@ -16,6 +16,8 @@ class QueryGraphState(TypedDict):
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
     hyde_embedding_chunks: list  # 已向量化的假设性问题切片
+    graph_chunks: list  # 图关系回溯出的切片
+    graph_paths: list  # 图检索返回的实体路径
     web_search_docs: list  # 网络搜索回来的文档
 
     # 排序过程中的数据

@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>掌柜智库：当前版本全项目总思路链</title>
+  <style>
+    :root { --ink:#1c2b31; --muted:#62747a; --accent:#0c6873; --gold:#a86e2b; --line:rgba(46,87,91,.22); --glass:rgba(255,255,255,.62); --strong:rgba(255,255,255,.82); --shadow:0 18px 45px rgba(38,69,70,.12); }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:linear-gradient(120deg,rgba(226,238,234,.92),rgba(248,244,232,.92)),#e9f0ed; font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",sans-serif; line-height:1.7; -webkit-font-smoothing:antialiased; }
+    .page { width:min(1540px,calc(100% - 40px)); margin:auto; padding:34px 0 72px; }
+    header { padding:10px 0 24px; border-bottom:1px solid var(--line); }
+    h1 { margin:0; color:#17464e; font-size:clamp(25px,3vw,38px); line-height:1.2; letter-spacing:0; }
+    header p { max-width:980px; margin:12px 0 0; color:var(--muted); font-size:14px; }
+    nav { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:20px; }
+    nav a { color:var(--accent); font-size:13px; text-decoration:none; border-bottom:1px solid transparent; }
+    nav a:hover,nav a:focus-visible { border-bottom-color:var(--accent); outline:none; }
+    section { margin-top:42px; }
+    h2 { margin:0 0 14px; padding-bottom:9px; color:#17464e; border-bottom:2px solid rgba(23,70,78,.7); font-size:22px; line-height:1.3; }
+    h3 { margin:28px 0 11px; padding-left:11px; color:var(--accent); border-left:3px solid var(--accent); font-size:16px; line-height:1.35; }
+    .lead { max-width:1050px; margin:0 0 14px; color:var(--muted); font-size:13px; }
+    .flow-wrap { overflow:auto; border:1px solid rgba(255,255,255,.85); border-radius:10px; background:var(--glass); box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.9); -webkit-backdrop-filter:blur(15px) saturate(120%); backdrop-filter:blur(15px) saturate(120%); text-align:center; }
+    pre.flow { display:inline-block; width:max-content; min-width:100%; margin:0; padding:26px 30px; color:var(--ink); background:rgba(255,255,255,.48); font:13px/1.82 Consolas,"Cascadia Mono","Noto Sans Mono CJK SC","Microsoft YaHei",monospace; text-align:left; white-space:pre; tab-size:4; }
+    .callout { margin-top:16px; padding:13px 16px; color:#674a24; border-left:3px solid var(--gold); background:rgba(255,249,235,.8); font-size:13px; }
+    .index { display:grid; grid-template-columns:230px minmax(0,1fr); overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--strong); box-shadow:var(--shadow); }
+    .index div { padding:10px 13px; border-bottom:1px solid var(--line); font-size:13px; }
+    .index div:nth-last-child(-n+2) { border-bottom:0; }
+    .index .name { color:var(--accent); font-family:Consolas,monospace; }
+    .index .why { color:var(--muted); }
+    footer { margin-top:50px; padding-top:14px; color:var(--muted); border-top:1px solid var(--line); font-size:12px; }
+    @media(max-width:700px) { .page{width:min(100% - 22px,1540px);padding-top:18px;} section{margin-top:32px;} h2{font-size:19px;} pre.flow{padding:19px 16px;font-size:12px;line-height:1.72;} .index{grid-template-columns:1fr;} .index div:nth-last-child(2){border-bottom:1px solid var(--line);} }
+  </style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <h1>掌柜智库：当前版本全项目总思路链</h1>
+    <p>按当前代码整理的纯文本箭头链路：入口 → 节点 → 分支 → 汇合 → 存储 → 前端输出。重点展示 Graph RAG、HyDE、稳定 document_id、统一知识集合和删除链。</p>
+    <nav aria-label="流程导航"><a href="#total">总图</a><a href="#query">查询链</a><a href="#node-detail">节点详链</a><a href="#import">导入链</a><a href="#education">教育链</a><a href="#graph">图谱链</a><a href="#storage">存储删除</a><a href="#answer">答案输出</a><a href="#index">节点索引</a></nav>
+  </header>
+
+  <section id="total"><h2>一张总图</h2><p class="lead">所有资料导入统一进入 Milvus；普通文档和 Obsidian 成功写入后继续构建 Neo4j 图；查询侧组合普通向量、Graph、可选 HyDE 和可选 Web。</p>
+    <div class="flow-wrap"><pre class="flow">用户动作
+  ↓
+FastAPI：app_service.py
+  ↓
+  ├── POST /query → QueryGraph
+  ├── POST /upload → ImportGraph
+  ├── POST /upload_obsidian → 每篇笔记一个 ImportGraph 任务
+  ├── POST /import_local → 本地目录扫描后进入 ImportGraph
+  ├── POST /education/import → 教育资料确定性解析链
+  └── DELETE /knowledge/... → Milvus + Neo4j 联动删除
+
+普通文档 / Obsidian / 本地目录
+  ↓
+node_entry → 格式转换 → node_md_img
+  ↓
+node_document_split → node_item_name_recognition
+  ↓
+node_bge_embedding → node_import_milvus
+  ↓
+knowledge_chunks_graph → node_graph_build → Neo4j
+
+教育资料
+  ↓
+课程 / 题目确定性解析 → 教育向量化 → knowledge_chunks_graph
+
+用户问题
+  ↓
+node_item_name_confirm → after_confirm_router
+  ├── answer / chitchat → node_answer_output
+  └── 正常问题 → after_confirm_router 返回并行节点列表
+        ├── node_search_embedding ──────────────┐
+        ├── node_graph_search ──────────────────┤
+        ├── node_search_embedding_hyde（可选） ──┤
+        └── node_web_search_mcp（可选） ────────┘
+                         ↓ 等待并行分支汇合
+                     node_rrf（普通向量 + Graph + HyDE）
+                         ↓
+                     node_rerank（RRF 结果 + Web）
+                         ↓
+                 node_answer_output → LLM → SSE</pre></div>
+  </section>
+
+  <section id="query"><h2>查询链</h2>
+    <h3>意图、主体和重写</h3>
+    <div class="flow-wrap"><pre class="flow">用户问题 original_query
+  ↓
+保存 MongoDB chat_history → 拿 message_id
+  ↓
+读取最近 HISTORY_LIMIT 条历史 → 拼 history_content
+  ↓
+判断元问题
+  ├── 是 → query_type=chitchat，item_names=[]，不调用 LLM
+  │          ↓
+  │        node_answer_output
+  └── 否 → LLM 结构化识别
+             ↓ query_type + item_names + rewritten_query
+           query_type == chitchat？
+             ├── 是 → node_answer_output
+             └── 否 → 继续主体确认
+
+item_names 有值 → BGE-M3 → Milvus item_collection
+  ↓
+保留 score >= 0.5 → 去重保序 → final_item_names
+  ↓
+只回写当前 message_id
+
+item_names 为空或主体匹配失败
+  ↓
+final_item_names=[] → 不阻断查询 → 后续宽泛检索</pre></div>
+    <h3>多路召回和汇合</h3>
+    <div class="flow-wrap"><pre class="flow">正常问题
+  ↓
+after_confirm_router 返回并行节点列表
+  ├── node_search_embedding（必走）
+  │     ↓ embedding_chunks
+  ├── node_graph_search
+  │     ├── 无主体 → graph_chunks=[]、graph_paths=[]
+  │     └── 有主体 → Neo4j hops=2 → chunk_id → Milvus 正文
+  │                            ↓ graph_chunks + graph_paths
+  ├── ENABLE_HYDE=true → node_search_embedding_hyde
+  │                         ↓ hyde_embedding_chunks
+  └── ENABLE_WEB_SEARCH=true → node_web_search_mcp
+                                ↓ web_search_docs
+  ↓ 等待所有本轮已调度分支完成
+embedding + graph + hyde → node_rrf → rrf_chunks
+  ↓
+rrf_chunks + web_search_docs → node_rerank → reranked_docs
+  ↓
+node_answer_output</pre></div>
+    <div class="callout">准确关系：RRF 读取普通向量、Graph 和 HyDE；Web 结果保留在 State，交给 node_rerank 与 RRF 结果一起重排。</div>
+  </section>
+
+  <section id="node-detail"><h2>查询节点逐个展开</h2>
+    <h3>node_item_name_confirm：意图、主体与问题重写</h3>
+    <div class="flow-wrap"><pre class="flow">original_query
+  ↓
+校验 session_id 和问题
+  ↓
+写入 MongoDB chat_history
+  ↓
+拿当前 message_id
+  ↓
+读取最近 HISTORY_LIMIT 条历史
+  ↓
+按时间从旧到新重排 → 拼 history_content
+  ↓
+判断“我刚才问了什么 / 上一轮说了什么”等元问题
+  ├── 命中 → 不调用 LLM
+  │          ↓ query_type=chitchat，item_names=[]，rewritten_query=original_query
+  │          ↓ 只更新当前 message_id → node_answer_output
+  └── 未命中 → 调用 LLM 结构化识别
+             ↓ query_type + item_names + rewritten_query
+           query_type=chitchat？是 → node_answer_output
+                              否 → 继续主体匹配
+  ↓
+item_names 有值 → BGE-M3 → item_collection → score >= 0.5 → 去重保序
+  ↓
+final_item_names → 回写当前 message_id → 返回 QueryGraphState
+  ↓
+主体为空 / 匹配失败 → item_names=[] → 不阻断 → 后续宽泛检索</pre></div>
+
+    <h3>node_search_embedding：普通混合向量检索</h3>
+    <div class="flow-wrap"><pre class="flow">rewritten_query + query_type + final_item_names
+  ↓
+BGE-M3 → dense_vector + sparse_vector
+  ↓
+查询 knowledge_chunks_graph
+  ↓
+course → content_type=course_intro
+question → content_type=question
+doc / knowledge → 不强制 content_type
+  ↓
+doc / knowledge 有主体 → 增加 item_name 过滤
+doc / knowledge 无主体 → 宽泛检索
+course / question → 不叠加 item_name 过滤
+  ↓
+Milvus dense + sparse 混合搜索，每路 limit=20
+  ↓
+有主体过滤且零命中？是 → 去掉 item_name 过滤 → 全库重试
+  ↓
+embedding_chunks → node_rrf</pre></div>
+
+    <h3>node_search_embedding_hyde：条件式第二路检索</h3>
+    <div class="flow-wrap"><pre class="flow">读取 rewritten_query + query_type
+  ↓
+course / question？
+  ├── 是 → hyde_embedding_chunks=[] → 不调 LLM → 不做第二次向量检索
+  └── 否 → doc / knowledge
+             ↓
+           LLM 生成假设性答案
+             ↓
+           rewritten_query + hyde_answer
+             ↓
+           BGE-M3 → dense + sparse → Milvus
+             ↓
+           主体过滤零命中？是 → 去掉主体过滤 → 全库重试
+             ↓
+           hyde_embedding_chunks → node_rrf</pre></div>
+
+    <h3>node_graph_search：按关系扩展证据</h3>
+    <div class="flow-wrap"><pre class="flow">item_names + query_type
+  ↓
+没有主体 → graph_chunks=[]、graph_paths=[] → node_rrf
+  ↓
+有主体 → query_type 映射 content_type
+  ↓
+GraphStore.find_related_chunks(hops=2)
+  ↓
+Neo4j 返回 chunk_id + path
+  ↓
+按 chunk_id 回 knowledge_chunks_graph 取完整正文
+  ↓
+附加 source=graph、graph_path、score=0.0
+  ↓
+graph_chunks + graph_paths → node_rrf
+
+Neo4j 故障 → warning → 空图结果 → 继续其他召回</pre></div>
+
+    <h3>node_web_search_mcp：可选外部检索</h3>
+    <div class="flow-wrap"><pre class="flow">ENABLE_WEB_SEARCH=true
+  ↓
+使用 rewritten_query 调用 Web MCP
+  ↓
+整理标题、正文、URL
+  ↓
+web_search_docs
+  ↓
+保留到 State，交给 node_rerank
+
+ENABLE_WEB_SEARCH=false → 不注册 / 不执行 Web 节点</pre></div>
+
+    <h3>node_rrf：普通向量、HyDE、Graph 融合</h3>
+    <div class="flow-wrap"><pre class="flow">embedding_chunks → rank → weight=1.0 ─────┐
+hyde_embedding_chunks → rank → weight=0.8 ──┼→ node_rrf
+graph_chunks → rank → weight=1.5 ──────────┘
+  ↓
+按 chunk_id 合并重复 Chunk，保留 graph_path
+  ↓
+rrf_score += weight / (rrf_k + rank + 1)
+  ↓
+默认 rrf_k=60 → 按分数排序
+  ↓
+rrf_chunks → node_rerank
+
+注意：web_search_docs 不参与 RRF 分数计算</pre></div>
+
+    <h3>node_rerank：统一重排</h3>
+    <div class="flow-wrap"><pre class="flow">rrf_chunks + web_search_docs
+  ↓
+统一整理本地 Chunk 和 Web 文档
+  ↓
+调用重排模型 / 重排逻辑
+  ↓
+比较问题与候选证据相关性
+  ↓
+按重排分数排序
+  ↓
+reranked_docs → node_answer_output</pre></div>
+
+    <h3>node_answer_output：答案、续接和前端输出</h3>
+    <div class="flow-wrap"><pre class="flow">State.answer 已存在？
+  ├── 是 → 保存 assistant → final → 结束
+  └── 否 → chat_summary + 最近 QUERY_HISTORY_LIMIT 条历史
+             ↓
+           chitchat → CHAT_PROMPT → LLM
+           无结果 → NO_RESULT_PROMPT → 兜底回答
+           有结果 → title/source/url/content → 上下文预算 → ANSWER_PROMPT
+             ↓
+           llm.stream → 每个 delta 写入队列 → SSE
+             ↓
+           正常结束 → 收尾
+           length / max_tokens → 从末尾续接，不重复全文
+           网络 / 模型异常 → 保留已有内容并追加可读收尾
+             ↓
+           提取图片 URL → MongoDB 保存 assistant
+             ↓
+           final(answer + image_urls) → 异步更新 chat_summary</pre></div>
+  </section>
+
+  <section id="import"><h2>普通、Obsidian、本地导入链</h2>
+    <div class="flow-wrap"><pre class="flow">普通上传 /upload
+  ↓ 批量文件：主文档 + 附属图片
+source_type=document / source_id=browser-upload / source_path=文件名
+  ↓ 稳定 document_id → ImportGraph
+
+Obsidian 上传 /upload_obsidian
+  ↓ 浏览器拖拽 Vault / 文件夹，保留 Vault 相对路径
+source_type=obsidian / source_id=browser-upload:Vault名称 / source_path=相对路径
+  ↓ 每篇 Markdown 一个任务 → ImportGraph
+
+本地扫描 /import_local
+  ↓ 服务端读取目录及其文档
+source_type=document / source_id=目录绝对路径 / source_path=目录内相对路径
+  ↓ 每个文档 → ImportGraph
+
+三种入口
+  ↓
+node_entry
+  ├── .md → node_md_img
+  ├── .pdf → node_pdf_to_md → node_md_img
+  └── .docx → node_docx_to_md → node_md_img
+  ↓
+node_document_split → node_item_name_recognition
+  ↓
+node_bge_embedding → node_import_milvus → node_graph_build → END</pre></div>
+    <h3>通用导入节点逐个展开</h3>
+    <div class="flow-wrap"><pre class="flow">node_entry
+  ↓ 校验文件存在、读取后缀、设置读取标志和 file_title
+  ↓ 保留 source_type / source_id / source_path
+  ↓ 没有 document_id → 根据来源三元组计算稳定 document_id
+  ↓ .md → node_md_img；.pdf → node_pdf_to_md；.docx → node_docx_to_md
+
+node_pdf_to_md
+  ↓ pdf_path → PDF 解析服务 → batch_id / 上传 URL
+  ↓ 上传 PDF → 轮询解析 → 下载 Markdown zip → 解压
+  ↓ 读取 md_content + md_path → node_md_img
+  ↓ 任一服务环节失败 → 当前任务 failed
+
+node_docx_to_md
+  ↓ 校验路径 → 延迟导入 python-docx → Document(docx_path)
+  ↓ 按 Word body 原顺序遍历
+  ├── 段落 → Heading 1~4 转 #~####；普通段落原样保留
+  └── 表格 → 逐行读取单元格 → Markdown 表格
+  ↓ 两个换行拼 md_content → 写 *_converted.md → node_md_img
+  ↓ 当前主要提取段落、标题、表格，不处理 DOCX 内嵌图片
+
+node_md_img
+  ↓ 读取 Markdown → 定位同级 images/
+  ↓ 找 Markdown 图片或 HTML 图片引用
+  ↓ 截取图片附近约 200 字符 → 视觉模型生成摘要
+  ↓ 限制并发；速率 / 网络错误指数退避重试
+  ↓ 上传 MinIO → 原引用替换为摘要 + URL
+  ↓ 写 *_backup.md → 输出 md_content → node_document_split
+
+node_document_split
+  ↓ State.md_content 优先，否则读取 md_path
+  ↓ 统一换行 → 标题栈建章节树 → breadcrumb / section_path
+  ↓ 代码块内 # 不当标题；记录 parent_key
+  ↓ 合并过小兄弟区块
+  ↓ RecursiveCharacterTextSplitter 精切
+  ↓ CHUNK_SIZE / MAX_WHOLE_SECTION / CHUNK_OVERLAP
+  ↓ 输出 chunk_id、document_id、chunk_index、section_path、content
+
+node_item_name_recognition
+  ↓ 文件名 + 去重章节标题 + 开头/中间/结尾代表性 Chunk
+  ↓ evidence 上限 12000 字符 → LLM 识别主体
+  ↓ 清理前缀、引号、标点和 unknown/null 等不确定值
+  ↓ 名称不在 evidence → 回退 file_title
+  ↓ 主体向量化 → 删除 item_collection 同名旧主体 → 插入新主体
+  ↓ 给每个 Chunk 写 item_name → node_bge_embedding
+
+node_bge_embedding
+  ↓ 每 3 个 Chunk 一批
+  ↓ 拼 file_title + item_name + content
+  ↓ BGE-M3 → dense_vector + sparse_vector
+  ↓ 按原顺序写回并校验 → node_import_milvus
+
+node_import_milvus
+  ↓ 补齐来源元数据和 document_id
+  ↓ 校验字段、长度、dense_vector、sparse_vector
+  ├── 失败 → 旧数据不删除 → task failed
+  └── 成功 → replace_document → 删除同 document_id 旧 Chunk → 插入新 Chunk
+                                      ↓ node_graph_build
+
+node_graph_build
+  ↓ 确认 Milvus 写入成功 → 读取当前文档 Chunk
+  ↓ 大文档分批 → LLM 抽实体 / 关系 JSON
+  ↓ 解析 → 规范化别名 → 合并实体 → 校验端点和关系白名单
+  ↓ GraphStore.replace_document(document_id)
+  ↓ 删除旧图 → 写入 Document / Chunk / Entity / Relation → END</pre></div>
+  </section>
+
+  <section id="education"><h2>教育资料链</h2>
+    <div class="flow-wrap"><pre class="flow">POST /education/import
+  ↓
+collect_education_import_inputs
+  ↓
+课程介绍.md → parse_course_md
+  ↓ 按课程系列切分，一个系列一个 course_intro Chunk
+题目资料.md → parse_question_md
+  ↓ 按题目切分，一道题一个 question Chunk
+  ↓
+vectorize_chunks → dense_vector + sparse_vector
+  ↓
+import_chunks → knowledge_chunks_graph
+  ├── content_type=course_intro
+  └── content_type=question
+  ↓
+register_item_names（失败只 warning）
+  ↓
+返回课程数、题目数、主体数
+
+教育查询
+  ↓
+course → content_type=course_intro
+question → content_type=question
+  ↓
+不叠加 item_name 过滤；HyDE 节点内部跳过</pre></div>
+  </section>
+
+  <section id="graph"><h2>图谱链</h2>
+    <h3>导入时构建，查询时使用</h3>
+    <div class="flow-wrap"><pre class="flow">Milvus 写入成功 → node_graph_build
+  ↓
+读取 document_id 的 Chunks → 大文档分批 → LLM 抽实体和关系 JSON
+  ↓
+解析 → 规范化别名 → 合并实体 → 校验端点和关系白名单
+  ↓
+GraphStore.replace_document(document_id)
+  ↓ 删除旧图 → 写入 Document / Chunk / Entity / Relation → Neo4j
+
+Document ──CONTAINS──→ Chunk ──MENTIONS──→ Entity
+Chunk ──NEXT──→ Chunk
+Entity ──业务关系──→ Entity
+
+查询时：item_names → node_graph_search → Neo4j hops=2
+  ↓
+chunk_id + path → 回 Milvus knowledge_chunks_graph 取正文
+  ↓
+source=graph / graph_path / score=0.0
+  ↓
+graph_chunks → node_rrf
+
+无主体或 Neo4j 故障 → graph 结果为空 → 继续向量 / HyDE / Web
+Graph 是增强检索，不是硬依赖</pre></div>
+  </section>
+
+  <section id="storage"><h2>存储、覆盖和删除</h2>
+    <div class="flow-wrap"><pre class="flow">source_type + source_id + source_path
+  ↓ build_document_id
+document_id
+  ↓
+KnowledgeChunkStore.replace_document
+  ↓
+校验新 Chunk
+  ├── 失败 → 旧数据保留 → 任务 failed
+  └── 成功 → 删除旧 document_id → 插入新 Chunk
+                         ↓
+                       node_graph_build → 替换旧图
+
+统一集合：knowledge_chunks_graph
+  ↓ id / chunk_id / document_id / source_type / source_id / source_path
+    item_name / content_type / chunk_index / section_path / content
+    dense_vector / sparse_vector
+
+DELETE /knowledge/documents/{document_id}
+  ↓ 单文档 Milvus 删除 → 单文档 Neo4j 删除
+DELETE /knowledge/sources/{source_type}?source_id=...
+  ↓ 按来源找文档 → Milvus 删除 → 逐个 document_id 删除图
+DELETE /knowledge/directories
+  ↓ 按 source_path 前缀 → Milvus 删除 → 同步删除图
+
+Neo4j 删除失败 → warning → 不阻断已成功的 Milvus 删除
+
+同名不等于覆盖；三项来源身份完全一致，document_id 才一致</pre></div>
+  </section>
+
+  <section id="answer"><h2>答案与流式输出</h2>
+    <div class="flow-wrap"><pre class="flow">node_answer_output
+  ↓
+State.answer 已存在？
+  ├── 是 → 保存 assistant → final → 结束
+  └── 否 → chat_summary + 最近原始历史
+             ↓
+           reranked_docs 为空？
+             ├── chitchat → CHAT_PROMPT → LLM
+             ├── 无结果 → NO_RESULT_PROMPT → 兜底回答
+             └── 有结果 → title/source/url/content → 上下文预算
+                                      ↓ ANSWER_PROMPT → llm.stream
+  ↓
+delta → SSE；length 截断 → 从末尾续接；异常 → 可读收尾
+  ↓
+提取图片 URL → 保存 MongoDB assistant
+  ↓
+final(answer + image_urls) → 异步更新 chat_summary</pre></div>
+  </section>
+
+  <section id="frontend"><h2>前端任务链</h2>
+    <div class="flow-wrap"><pre class="flow">查询：POST /query → task_id → EventSource(/stream/{task_id})
+  ├── progress → 节点、耗时和状态
+  ├── context_info → 召回上下文和来源
+  ├── delta → 增量答案
+  └── final → 最终答案、图片、完成状态
+
+导入：POST /upload /upload_obsidian /import_local → task_id
+  ↓
+轮询 /status/{task_id}
+  ↓
+running_list / done_list / durations / error_msg
+  ↓
+completed / failed / cancelled
+
+停止：POST /query/{task_id}/cancel → 设置取消状态
+  ↓
+后台查询节点检查取消信号 → 停止后续处理或结束流</pre></div>
+  </section>
+
+  <section id="index"><h2>当前节点索引</h2>
+    <div class="index">
+      <div class="name">node_item_name_confirm</div><div class="why">消息、历史、元问题、意图、主体匹配、问题重写</div>
+      <div class="name">node_search_embedding</div><div class="why">普通 BGE-M3 dense + sparse 混合检索</div>
+      <div class="name">node_search_embedding_hyde</div><div class="why">普通文档 HyDE 第二路检索；教育查询内部跳过</div>
+      <div class="name">node_graph_search</div><div class="why">Neo4j 主体关系扩展，再回 Milvus 取 Chunk</div>
+      <div class="name">node_web_search_mcp</div><div class="why">按 ENABLE_WEB_SEARCH 开启的 Web 检索</div>
+      <div class="name">node_rrf</div><div class="why">融合普通向量、HyDE 和 Graph</div>
+      <div class="name">node_rerank</div><div class="why">重排本地结果并合并 Web</div>
+      <div class="name">node_answer_output</div><div class="why">上下文、LLM 流式回答、续接、图片、历史、SSE</div>
+      <div class="name">node_entry</div><div class="why">文件校验、来源身份和格式路由</div>
+      <div class="name">node_pdf_to_md</div><div class="why">PDF 解析服务转 Markdown</div>
+      <div class="name">node_docx_to_md</div><div class="why">DOCX 标题、段落、表格转 Markdown</div>
+      <div class="name">node_md_img</div><div class="why">图片摘要、MinIO 上传、引用替换和备份</div>
+      <div class="name">node_document_split</div><div class="why">章节树、面包屑、合并和递归切 Chunk</div>
+      <div class="name">node_item_name_recognition</div><div class="why">主体识别、证据校验和同名主体覆盖</div>
+      <div class="name">node_bge_embedding</div><div class="why">正文 dense / sparse 向量化</div>
+      <div class="name">node_import_milvus</div><div class="why">新数据校验、按 document_id 覆盖和统一写入</div>
+      <div class="name">node_graph_build</div><div class="why">实体关系抽取及 Neo4j 文档图替换</div>
+    </div>
+  </section>
+  <footer>更新基准：2026-08-29 工作区当前代码。对应 Markdown：掌柜智库/docs/architecture/掌柜智库-全链路思维图.md。</footer>
+</main>
+</body>
+</html>

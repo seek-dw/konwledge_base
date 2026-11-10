@@ -123,5 +123,5 @@ if __name__ == '__main__':
         "item_names": ["HAK180烫金机"]
     }
     node = NodeWebSearchMcp()
-    res = node(init_state)
+    res = node.process(init_state)
     logger.info(convert_to_json(res))

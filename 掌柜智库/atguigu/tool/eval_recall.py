@@ -12,20 +12,27 @@
     # 模式3: 使用自定义评测集(JSON文件)
     python -m atguigu.tool.eval_recall --file my_eval.json
 
-自定义评测集格式(JSON数组,每个元素):
+    # 模式4: 只评估 RRF，排查 Rerank 是否改变召回
+    python -m atguigu.tool.eval_recall --file my_eval.json --skip-rerank
+
+    自定义评测集格式(JSON数组,每个元素):
     {
         "query": "python数据分析课程讲什么",
         "expect_item_names": ["Python数据分析系列"],   # 可选: 期望命中的主体名
-        "expect_keywords": ["pandas"]                  # 可选: 期望命中的内容关键词
+        "expect_keywords": ["pandas"],                  # 可选: 期望命中的内容关键词
+        "expect_chunk_ids": ["chunk_x"],                # 推荐: 真实 Chunk ground truth
+        "expect_document_ids": ["doc_x"]                # 可选: 真实 Document ground truth
     }
 
 指标说明:
     Hit@K     : Top-K条结果中至少有1条命中期望 → 该query记1次命中
     Recall@K  : 期望的主体名/关键词被召回的比例(多期望时按条平均)
     MRR       : 第一条命中结果的排名倒数的平均值(排名越靠前分越高,1.0=全在首位)
-评测原理: 完全复刻线上检索链路 node_search_embedding 的参数
-    (BGE-M3稠密+稀疏双路向量 -> WeightedRanker(0.9,0.1)混合检索 -> Top-K),
-    评测结果即线上真实召回水平,不是模拟。
+    自动生成的评测集只是“主体名冒烟测试”，不能代表真实问答召回率。
+    真实评测应在自定义 JSON 中填写 expect_chunk_ids/expect_document_ids。
+    评测原理: 固定意图/主体后复用线上向量、Graph、RRF、Rerank节点，
+    分别报告 vector、graph、fused、final 四个阶段的指标；没有填写真实
+    expect_chunk_ids/expect_document_ids 时只标记为 smoke，不冒充真实召回率。
 """
 import argparse
 import json
@@ -35,7 +42,22 @@ import time
 from atguigu.config.config import MilvusConfig
 from atguigu.tool.bgem3_create_tool import vectorize_texts
 from atguigu.tool.logger import logger
-from atguigu.tool.milvus_client_create import create_reqs, get_milvus_client, my_hybrid_search
+from atguigu.tool.milvus_client_create import (
+    CHUNK_OUTPUT_FIELDS,
+    create_reqs,
+    ensure_collection_loaded,
+    get_milvus_client,
+    my_hybrid_search,
+    select_existing_output_fields,
+)
+# ==================== AI修改 开始 ====================
+# 评测直接复用线上召回节点，避免脚本只测 Milvus 而线上实际走了 Graph/RRF/Rerank。
+from atguigu.query_process.nodes.node_graph_search import NodeGraphSearch
+from atguigu.query_process.nodes.node_rerank import NodeRerank
+from atguigu.query_process.nodes.node_rrf import NodeRrf
+from atguigu.query_process.nodes.node_search_embedding import NodeSearchEmbedding
+from atguigu.query_process.nodes.node_search_embedding_hyde import NodeSearchEmbeddingHyde
+# ==================== AI修改 结束 ====================
 
 # 评测默认参数(与线上node_search_embedding完全一致)
 RANKER_WEIGHTS = [0.9, 0.1]
@@ -88,12 +110,14 @@ def build_eval_set_from_milvus(sample: int = 0):
             "expect_item_names": [name],
             "expect_content_type": ct,
             "chunk_count": cnt,
+            "evaluation_mode": "self_generated_smoke",
         })
     return eval_set
 
 
 def search_one(query: str, expr: str = None):
-    """复刻node_search_embedding的检索: 同样的向量、ranker权重、output_fields"""
+    """保留一个纯向量检索入口，便于排查向量路由本身。"""
+    ensure_collection_loaded(MilvusConfig.milvus_chunks_collection)
     embed = vectorize_texts([query])
     dense_data = embed.get("dense")[0]
     sparse_data = embed.get("sparse")[0]
@@ -110,8 +134,9 @@ def search_one(query: str, expr: str = None):
         collection_name=MilvusConfig.milvus_chunks_collection,
         reqs=reqs,
         ranker=RANKER_WEIGHTS,
-        output_fields=["id", "title", "file_title", "content", "item_name",
-                       "content_type", "source_name", "code", "q_type"],
+        output_fields=select_existing_output_fields(
+            get_milvus_client(), MilvusConfig.milvus_chunks_collection, CHUNK_OUTPUT_FIELDS
+        ),
         limit=SEARCH_LIMIT,
     )
     return [
@@ -120,91 +145,171 @@ def search_one(query: str, expr: str = None):
     ]
 
 
-def evaluate_one(case: dict):
-    """评测单条: 返回各K的命中情况与首个命中排名"""
-    query = case["query"]
-    expect_items = set(case.get("expect_item_names") or [])
-    expect_kws = [k.lower() for k in (case.get("expect_keywords") or [])]
-    expect_ct = case.get("expect_content_type")  # 自动生成的评测集才带
+# ==================== AI修改 开始 ====================
+# 固定评测输入中的意图和主体，跳过线上 LLM 意图识别，只测真实召回链路。
+def search_pipeline_one(case: dict, skip_rerank: bool = False) -> dict:
+    state = {
+        "original_query": case["query"],
+        "rewritten_query": case.get("rewritten_query") or case["query"],
+        "query_type": case.get("query_type") or {
+            "course_intro": "course",
+            "question": "question",
+        }.get(case.get("expect_content_type"), "knowledge"),
+        "item_names": case.get("item_names") or case.get("expect_item_names") or [],
+    }
+    vector = NodeSearchEmbedding().process(state).get("embedding_chunks", [])
+    graph = NodeGraphSearch().process(state).get("graph_chunks", [])
+    hyde = []
+    if os.getenv("ENABLE_HYDE", "false").strip().lower() in ("1", "true", "yes", "on"):
+        hyde = NodeSearchEmbeddingHyde().process(state).get("hyde_embedding_chunks", [])
+    fused = NodeRrf().process({
+        "embedding_chunks": vector,
+        "hyde_embedding_chunks": hyde,
+        "graph_chunks": graph,
+    }).get("rrf_chunks", [])
+    final = fused
+    if not skip_rerank:
+        final = NodeRerank().process({
+            "rrf_chunks": fused,
+            "web_search_docs": [],
+            "rewritten_query": state["rewritten_query"],
+        }).get("reranked_docs", [])
+    return {"vector": vector, "graph": graph, "hyde": hyde, "fused": fused, "final": final}
+# ==================== AI修改 结束 ====================
 
-    results = search_one(query)
-    # 命中判定: 主体名匹配 或 关键词出现在content里 (或content_type匹配,仅自动集)
-    hit_ranks = []  # 每个期望目标的命中排名(1-based)
-    for target in expect_items | set(expect_kws):
-        rank = None
-        for i, r in enumerate(results):
-            content = (r.get("content") or "").lower()
-            item_name = r.get("item_name") or ""
-            if target in item_name or (target in content and target in expect_kws):
-                rank = i + 1
-                break
+
+def _match_target(result: dict, target_type: str, target: str) -> bool:
+    if target_type == "chunk_id":
+        return result.get("chunk_id") == target
+    if target_type == "document_id":
+        return result.get("document_id") == target
+    if target_type == "item_name":
+        return target in (result.get("item_name") or "")
+    return target in (result.get("content") or "").lower()
+
+
+def _route_result(results, targets):
+    hit_ranks = []
+    for target_type, target in targets:
+        rank = next(
+            (index + 1 for index, result in enumerate(results)
+             if _match_target(result, target_type, target)),
+            None,
+        )
         if rank:
             hit_ranks.append(rank)
-    # content_type附加判定: 自动集的期望类型应出现在Top10
-    ct_hit = False
-    if expect_ct:
-        ct_hit = any(r.get("content_type") == expect_ct for r in results)
-
-    n_targets = max(1, len(expect_items) + len(expect_kws))
-    per_k = {}
-    for k in EVAL_TOP_K:
-        hits = sum(1 for rank in hit_ranks if rank <= k)
-        per_k[k] = hits / n_targets
+    per_k = {
+        k: sum(rank <= k for rank in hit_ranks) / max(1, len(targets))
+        for k in EVAL_TOP_K
+    }
     first_rank = min(hit_ranks) if hit_ranks else None
     return {
-        "query": query,
-        "n_results": len(results),
+        "recall": per_k,
         "hit": bool(hit_ranks),
-        "ct_hit": ct_hit,
         "first_rank": first_rank,
-        "recall_per_k": per_k,
-        "top1_item": results[0].get("item_name") if results else "",
-        "top1_title": results[0].get("title") if results else "",
+        "mrr": 1.0 / first_rank if first_rank else 0.0,
     }
 
 
-def run_eval(eval_set, out_path="eval_recall_report.json"):
+# ==================== AI修改 开始 ====================
+# 真实评测使用 Chunk/Document ID；主体名和关键词仅作为 smoke 兼容指标。
+def evaluate_one(case: dict, skip_rerank: bool = False):
+    expect_chunks = set(case.get("expect_chunk_ids") or [])
+    expect_documents = set(case.get("expect_document_ids") or [])
+    targets = [("chunk_id", target) for target in expect_chunks]
+    targets += [("document_id", target) for target in expect_documents]
+    if not targets:
+        targets = [("item_name", target) for target in set(case.get("expect_item_names") or [])]
+        targets += [("keyword", target.lower()) for target in case.get("expect_keywords") or []]
+
+    pipeline = search_pipeline_one(case, skip_rerank=skip_rerank)
+    route_results = {
+        route: _route_result(pipeline.get(route, []), targets)
+        for route in ("vector", "graph", "hyde", "fused", "final")
+    }
+    final = route_results["final"]
+    final_results = pipeline.get("final", [])
+    return {
+        "query": case["query"],
+        "evaluation_mode": "ground_truth" if expect_chunks or expect_documents else "smoke",
+        "has_ground_truth": bool(expect_chunks or expect_documents),
+        "expected_chunk_ids": sorted(expect_chunks),
+        "expected_document_ids": sorted(expect_documents),
+        "n_results": len(final_results),
+        "hit": final["hit"],
+        "first_rank": final["first_rank"],
+        "recall_per_k": final["recall"],
+        "route_recall": {
+            route: data["recall"] for route, data in route_results.items()
+        },
+        "route_mrr": {
+            route: data["mrr"] for route, data in route_results.items()
+        },
+        "top1_item": final_results[0].get("item_name") if final_results else "",
+        "top1_title": final_results[0].get("title") if final_results else "",
+    }
+# ==================== AI修改 结束 ====================
+
+
+def run_eval(eval_set, out_path="eval_recall_report.json", skip_rerank=False):
     total = len(eval_set)
     logger.info(f"开始评测,共{total}条query,每条检索Top{SEARCH_LIMIT}...")
-    stats = {k: 0.0 for k in EVAL_TOP_K}
-    hit_count = 0
-    mrr_sum = 0.0
-    miss_cases = []
-    details = []
+    route_stats = {
+        route: {k: 0.0 for k in EVAL_TOP_K}
+        for route in ("vector", "graph", "hyde", "fused", "final")
+    }
+    route_mrr = {route: 0.0 for route in route_stats}
+    details, miss_cases = [], []
+    case_error_count = 0
     t0 = time.time()
     for i, case in enumerate(eval_set):
         try:
-            r = evaluate_one(case)
-        except Exception as e:
-            logger.error(f"第{i + 1}条评测异常: {e}")
+            result = evaluate_one(case, skip_rerank=skip_rerank)
+        except Exception as exc:
+            case_error_count += 1
+            logger.error(f"第{i + 1}条评测异常: {exc}")
+            details.append({"query": case.get("query", ""), "error": str(exc)})
             continue
-        details.append(r)
-        for k in EVAL_TOP_K:
-            stats[k] += r["recall_per_k"][k]
-        if r["hit"]:
-            hit_count += 1
-            mrr_sum += 1.0 / r["first_rank"]
-        else:
-            miss_cases.append({"query": r["query"], "top1_item": r["top1_item"],
-                               "top1_title": r["top1_title"]})
+        details.append(result)
+        for route in route_stats:
+            for k in EVAL_TOP_K:
+                route_stats[route][k] += result["route_recall"][route][k]
+            route_mrr[route] += result["route_mrr"][route]
+        if not result["hit"]:
+            miss_cases.append({"query": result["query"], "top1_item": result["top1_item"],
+                               "top1_title": result["top1_title"]})
         if (i + 1) % 10 == 0:
             logger.info(f"进度 {i + 1}/{total}")
 
+    evaluated = len(eval_set) - case_error_count
+    denominator = max(1, evaluated)
+    route_metrics = {
+        route: {
+            **{f"Recall@{k}": round(route_stats[route][k] / denominator, 4)
+               for k in EVAL_TOP_K},
+            "MRR": round(route_mrr[route] / denominator, 4),
+        }
+        for route in route_stats
+    }
+    ground_truth_count = sum(
+        result.get("has_ground_truth", False)
+        for result in details if "error" not in result
+    )
+    final_metrics = route_metrics["final"]
     summary = {
         "总query数": total,
-        "指标": {
-            f"Recall@{k}": round(stats[k] / total, 4) for k in EVAL_TOP_K
-        },
-        # ==================== AI修改 开始 ====================
-        # Hit标签跟随SEARCH_LIMIT动态变化,避免limit改了标签还写死@10的误导
-        f"Hit@{SEARCH_LIMIT}(至少命中一条的query占比)": round(hit_count / total, 4),
-        # ==================== AI修改 结束 ====================
-        "MRR(首个命中排名倒数的均值)": round(mrr_sum / total, 4),
+        "实际评测query数": evaluated,
+        "评测异常数": case_error_count,
+        "真实ground_truth数量": ground_truth_count,
+        "指标": final_metrics,
+        "各阶段指标": route_metrics,
         "评测耗时(秒)": round(time.time() - t0, 1),
         "评测配置": {
             "ranker权重(稠密,稀疏)": RANKER_WEIGHTS,
             "检索条数limit": SEARCH_LIMIT,
             "向量库": MilvusConfig.milvus_chunks_collection,
+            "是否跳过Rerank": skip_rerank,
+            "评测性质": "真实 ID 评测" if ground_truth_count else "主体/关键词 smoke，不能代表真实召回",
         },
         "未命中query清单": miss_cases[:50],
         "明细": details,
@@ -215,20 +320,10 @@ def run_eval(eval_set, out_path="eval_recall_report.json"):
     print("\n" + "=" * 52)
     print("           掌柜智库 召回率评测报告")
     print("=" * 52)
-    print(f"  评测query数 : {total}")
-    for k in EVAL_TOP_K:
-        print(f"  Recall@{k:<3}   : {summary['指标'][f'Recall@{k}']:.2%}")
-    # ==================== AI修改 开始 ====================
-    print(f"  Hit@{SEARCH_LIMIT:<3}    : {summary[f'Hit@{SEARCH_LIMIT}(至少命中一条的query占比)']:.2%}")
-    # ==================== AI修改 结束 ====================
-    print(f"  MRR         : {summary['MRR(首个命中排名倒数的均值)']:.2%}")
-    print(f"  耗时        : {summary['评测耗时(秒)']}s")
-    if miss_cases:
-        print("-" * 52)
-        print(f"  未命中 {len(miss_cases)} 条(前10条):")
-        for m in miss_cases[:10]:
-            print(f"    ✗ {m['query']}  (Top1={m['top1_item'] or m['top1_title']})")
-    print("=" * 52)
+    print(f"  评测query数 : {total} (成功 {evaluated}, 异常 {case_error_count})")
+    for route in ("vector", "graph", "fused", "final"):
+        print(f"  {route:<7} Recall@{SEARCH_LIMIT}: {route_metrics[route][f'Recall@{SEARCH_LIMIT}']:.2%}")
+    print(f"  final MRR  : {final_metrics['MRR']:.2%}")
     print(f"  完整报告已保存: {os.path.abspath(out_path)}")
     return summary
 
@@ -238,6 +333,7 @@ def main():
     parser.add_argument("--sample", type=int, default=0, help="只抽前N个主体评测(0=全部)")
     parser.add_argument("--file", type=str, default="", help="自定义评测集JSON路径")
     parser.add_argument("--out", type=str, default="eval_recall_report.json", help="报告输出路径")
+    parser.add_argument("--skip-rerank", action="store_true", help="跳过Rerank，只评估RRF结果")
     args = parser.parse_args()
 
     if args.file:
@@ -250,7 +346,7 @@ def main():
         if not eval_set:
             logger.error("向量库中没有带item_name的数据,无法自动生成评测集")
             return
-    run_eval(eval_set, out_path=args.out)
+    run_eval(eval_set, out_path=args.out, skip_rerank=args.skip_rerank)
 
 
 if __name__ == "__main__":

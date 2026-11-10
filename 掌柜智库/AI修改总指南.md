@@ -158,12 +158,14 @@ OPENROUTER_VL_MODEL=dots-studio/dots-3-note-preview:free
 目前重点配置是：
 
 ```text
-LLM_CONTEXT_WINDOW_TOKENS=32768
-LLM_MAX_TOKENS=6144
-ANSWER_SOFT_MAX_CHARS=3600
-ANSWER_DETAILED_SOFT_MAX_CHARS=6000
-ANSWER_SOFT_STOP_GRACE_CHARS=600
-LLM_PROMPT_SAFETY_TOKENS=2048
+LLM_CONTEXT_WINDOW_TOKENS=262144
+LLM_MAX_TOKENS=16384
+LLM_MAX_CONTINUATIONS=1
+LLM_CONTINUATION_CONTEXT_CHARS=24000
+ANSWER_MAX_CONTEXT_CHARS=48000
+ANSWER_MAX_HISTORY_CHARS=24000
+ANSWER_CONTEXT_DISPLAY_LIMIT=80000
+LLM_PROMPT_SAFETY_TOKENS=4096
 QUERY_HISTORY_LIMIT=20
 ```
 
@@ -285,6 +287,80 @@ ENABLE_HYDE=true
 - 重排序失败时保留原有召回顺序，答案仍然可以继续生成。
 
 如果要查实时新闻、价格或外部资料，可以在 `.env` 中打开 web_search，然后重启服务。日常查项目资料时建议保持关闭。
+
+<!-- ==================== AI修改 开始 ==================== -->
+### 6. 如何实测 Graph RAG 有没有带来收益
+
+新增离线脚本：`atguigu/tool/eval_graph_ab.py`。它不改变线上查询链路，而是对同一批问题做两条对照：
+
+```text
+baseline：向量 + 可选 HyDE → RRF → Rerank
+graph_on：向量 + 可选 HyDE + Graph → RRF → Rerank
+```
+
+向量和 HyDE 每个问题只执行一次，再把同一份结果分别送入两次 RRF；这样 Graph 开关前后的差异可以归因于 Graph，而不是两次独立检索的波动。Web Search 不参加这份评测，两条分支的条件保持一致。
+
+先从 `掌柜智库` 目录运行自动 smoke 评测：
+
+```powershell
+& '..\.venv\Scripts\python.exe' -m atguigu.tool.eval_graph_ab `
+  --sample 20 `
+  --out graph_ab_smoke_report.json
+```
+
+也可以使用样例评测集：
+
+```powershell
+& '..\.venv\Scripts\python.exe' -m atguigu.tool.eval_graph_ab `
+  --file tests\graph_eval_fixture.json `
+  --out graph_ab_report.json
+```
+
+样例里的 `expect_item_names` 只能验证主体名是否被召回，报告会把它标记为 `smoke`，不能据此证明召回率提升。正式评测时，把问题对应的真实值写进 JSON：
+
+```json
+{
+  "query": "FastAPI 和 Pydantic 分别负责什么？",
+  "expect_chunk_ids": ["Milvus 中真实的 chunk_id"]
+}
+```
+
+或者用更粗的文档级标准：
+
+```json
+{
+  "query": "FastAPI 和 Pydantic 分别负责什么？",
+  "expect_document_ids": ["Milvus 中真实的 document_id"]
+}
+```
+
+重点看报告中的这些字段：
+
+- `graph_final_recall_gain`：Graph 开启后最终 Recall@K 的变化，正数才代表收益。
+- `graph_unique_hit_queries`：Graph 单路找到了、但 baseline 最终结果没有命中的问题，说明 Graph 具备补充召回能力。
+- `graph_final_gain_queries`：Graph 最终结果真正新增命中的问题。
+- `regression_queries`：开启 Graph 后反而丢失 baseline 命中的问题，需要重点检查 RRF 权重或 Rerank。
+
+如果想排除 Rerank 的影响，只比较 RRF 候选：
+
+```powershell
+& '..\.venv\Scripts\python.exe' -m atguigu.tool.eval_graph_ab `
+  --file tests\graph_eval_fixture.json `
+  --skip-rerank `
+  --out graph_ab_rrf_only.json
+```
+
+如果想做纯向量与向量加 Graph 的对照，可以关闭 HyDE：
+
+```powershell
+& '..\.venv\Scripts\python.exe' -m atguigu.tool.eval_graph_ab `
+  --file tests\graph_eval_fixture.json `
+  --disable-hyde `
+  --out graph_ab_no_hyde.json
+```
+
+这份脚本只新增离线测试能力，没有新增线上 `.env` 开关，也没有改变生产查询是否调用 Graph。
+<!-- ==================== AI修改 结束 ==================== -->
 
 ---
 
@@ -495,9 +571,7 @@ python -m atguigu.edu_process.edu_import \
 
 ### 1. 答案输出变长
 
-答案模型的最大输出现在设置为 `6144` token，并增加了“软收束”机制。这样保留详细回答空间，但不会因为上限太大而一直扩写。
-
-普通问题默认约在 3600 字附近收束；明确要求“详细、深入、系统讲解”的问题允许约 6000 字。代码会优先等到句号、问号、感叹号、分号或段落边界再结束；如果模型长时间不输出标点，最多再放宽一小段字符。
+答案模型的单次最大输出现在设置为 `16384` token，正常回答只请求一次；只有 provider 明确因为输出上限硬截断时，才最多自动续写一次。
 
 提示词明确要求：
 
@@ -506,13 +580,13 @@ python -m atguigu.edu_process.edu_import \
 - 不省略关键细节、步骤、注意事项和适用场景。
 - 题目类回答要保留题干、选项、答案和解析。
 
-但“最大输出”只是硬上限，不代表每次一定输出 6144 token。真正的答案长度由问题类型、软收束长度和模型自然结束共同决定。
+“最大输出”只是硬上限，不代表每次一定输出 16384 token。真正的答案长度由问题类型、提示词要求和模型自然结束共同决定。
 
 如果用户确实需要更多内容，建议继续追问具体章节，而不是让一次回答无限扩展。这样可以减少重复解释，也能让答案更容易阅读。
 
 ### 2. 动态上下文预算
 
-现在不是简单地固定截取 18000 字检索内容、16000 字历史，然后再叠加问题和提示词。代码会先估算这一轮总预算：
+现在不是简单地固定截取 48000 字检索内容、24000 字历史，然后再叠加问题和提示词。代码会先估算这一轮总预算：
 
 ```text
 模型上下文窗口
@@ -892,7 +966,7 @@ queued -> processing -> waiting_response -> processing -> completed
 - 没有且页面一直转圈：检查 SSE、后端日志和模型接口。
 - 只针对宽泛问题发生：优先检查动态上下文预算和检索结果数量。
 
-现在答案还有软收束规则：普通问题约 3600 字，详细问题约 6000 字，达到完整句/段落后会主动结束，并提示“已完成本问题的核心内容”。如果仍然一直输出，确认后端已经重启，并检查 `.env` 中的 `ANSWER_SOFT_MAX_CHARS`、`ANSWER_DETAILED_SOFT_MAX_CHARS` 是否被改得过大。
+现在答案不会因为本地字符计数器达到某个软上限而主动截断。若末尾出现“达到本轮输出上限”的提示，说明 provider 触发了硬输出限制；确认后端已重启，并检查 `LLM_MAX_TOKENS` 与模型平台实际允许的输出上限。
 
 ---
 

@@ -10,6 +10,7 @@ from atguigu.import_process.nodes.node_bge_embedding import NodeBGEEmbedding
 from atguigu.import_process.nodes.node_document_split import NodeDocumentSplit
 from atguigu.import_process.nodes.node_entry import NodeEntry
 from atguigu.import_process.nodes.node_import_milvus import NodeImportMilvus
+from atguigu.import_process.nodes.node_graph_build import NodeGraphBuild
 from atguigu.import_process.nodes.node_item_name_recognition import NodeItemNameRecognition
 from atguigu.import_process.nodes.node_md_img import NodeMDImg
 from atguigu.import_process.nodes.node_pdf_to_md import NodePDFToMD
@@ -36,6 +37,10 @@ class MainGraphRunner:
         self.builder.add_node(NodeItemNameRecognition.name, NodeItemNameRecognition())
         self.builder.add_node(NodeBGEEmbedding.name, NodeBGEEmbedding())
         self.builder.add_node(NodeImportMilvus.name, NodeImportMilvus())
+        # ==================== AI修改 开始 ====================
+        # Milvus 写入成功后建立图数据，保证图中的 Chunk 证据已经存在。
+        self.builder.add_node(NodeGraphBuild.name, NodeGraphBuild())
+        # ==================== AI修改 结束 ====================
         # ==================== AI修改 开始 ====================
         # 教育实战新增：docx 转换节点
         self.builder.add_node(NodeDocxToMD.name, NodeDocxToMD())
@@ -74,7 +79,10 @@ class MainGraphRunner:
         self.builder.add_edge(NodeDocumentSplit.name, NodeItemNameRecognition.name)
         self.builder.add_edge(NodeItemNameRecognition.name, NodeBGEEmbedding.name)
         self.builder.add_edge(NodeBGEEmbedding.name, NodeImportMilvus.name)
-        self.builder.add_edge(NodeImportMilvus.name, END)
+        # ==================== AI修改 开始 ====================
+        self.builder.add_edge(NodeImportMilvus.name, NodeGraphBuild.name)
+        self.builder.add_edge(NodeGraphBuild.name, END)
+        # ==================== AI修改 结束 ====================
 
     def graph_run(self, state: ImportGraphState):
         # 懒加载,所以这里设置一个判断

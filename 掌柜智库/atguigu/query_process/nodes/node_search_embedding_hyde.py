@@ -51,7 +51,7 @@ class NodeSearchEmbeddingHyde(NodeBase):
             logger.error("向量搜索节点接收意图识别数据失败")
             raise Exception("向量搜索节点接收意图识别数据失败")
         # 2.HyDE条件化：课程/题目检索不走HyDE
-        #    假设性答案适合"知识点问答",对"课程列表/题目查询"这种结构化检索反而会跑偏
+        # 假设性答案适合"知识点问答",对"课程列表/题目查询"这种结构化检索反而会跑偏
         query_type = state.get("query_type", "")
         if query_type in ("course", "question"):
             return {
@@ -100,6 +100,7 @@ class NodeSearchEmbeddingHyde(NodeBase):
 
         # ==================== AI修改 开始 ====================
         # expr组合构建(与node_search_embedding保持一致,item_names可能为空)
+        # 课程/题目已在上方跳过 HyDE；这里仅处理普通知识问题。
         expr_conditions = []
         if item_names:
             item_expr = build_item_name_expr(item_names)
@@ -128,8 +129,7 @@ class NodeSearchEmbeddingHyde(NodeBase):
             reqs=reqs,
             ranker=[0.9, 0.1],
             # ==================== AI修改 开始 ====================
-            # 普通文档的 HyDE 仍查询旧 chunks collection；教育意图在上方已跳过 HyDE，
-            # 因此这里只请求普通表稳定存在的基础字段，兼容旧 collection schema。
+            # HyDE 与普通向量检索共用新集合和统一字段。
             output_fields=select_existing_output_fields(
                 get_milvus_client(), collection_name, CHUNK_OUTPUT_FIELDS
             ),
@@ -140,7 +140,35 @@ class NodeSearchEmbeddingHyde(NodeBase):
             limit=20
             # ==================== AI修改 结束 ====================
         )
-        # print(convert_to_json(res))
+        # ==================== AI修改 开始 ====================
+        # HyDE 同样不能把技术实体名当成 Chunk 文档归属名；过滤零命中时放宽一次。
+        if expr and not res[0]:
+            logger.warning(
+                f"HyDE 主体过滤零命中，放宽为全库检索: item_names={item_names}"
+            )
+            reqs = create_reqs(
+                dense_data=dense_data,
+                sparse_data=sparse_data,
+                dense_anns_field="dense_vector",
+                sparse_anns_field="sparse_vector",
+                dense_param={"metric_type": "COSINE"},
+                sparse_param={"metric_type": "IP"},
+                expr=None,
+            )
+            res = my_hybrid_search(
+                collection_name=collection_name,
+                reqs=reqs,
+                ranker=[0.9, 0.1],
+                output_fields=select_existing_output_fields(
+                    get_milvus_client(), collection_name, CHUNK_OUTPUT_FIELDS
+                ),
+                limit=20,
+            )
+        logger.info(
+            f"HyDE 本地向量检索完成: collection={collection_name}, "
+            f"filter={expr or 'none'}, hits={len(res[0])}"
+        )
+        # ==================== AI修改 结束 ====================
 
         hyde_embedding_chunks = [
             {
@@ -160,9 +188,9 @@ class NodeSearchEmbeddingHyde(NodeBase):
 
 if __name__ == '__main__':
     init_state = {
-        "rewritten_query": "关于HAK180烫金机如何使用",
-        "item_names": ["HAK180烫金机"]
+        "rewritten_query": "CNN是什么",
+        "item_names": ["CNN"]
     }
     node = NodeSearchEmbeddingHyde()
-    res = node(init_state)
+    res = node.process(init_state)
     logger.info(convert_to_json(res))

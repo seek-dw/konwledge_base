@@ -64,7 +64,7 @@ class NodeSearchEmbedding(NodeBase):
         sparse_data = embed_query.get("sparse")[0]
         # 拿到要检索的表名
         # ==================== AI修改 开始 ====================
-        # 课程/题目走教育专用表，普通文档继续走原表；两张表互不污染 schema。
+        # 所有正文来源都走统一新集合，课程/题目只通过 content_type 过滤。
         collection_name = MilvusConfig.milvus_chunks_collection
         # ==================== AI修改 结束 ====================
 
@@ -91,6 +91,7 @@ class NodeSearchEmbedding(NodeBase):
         # 由向量相似度+rerank保证相关性。item_name过滤仅用于doc/knowledge意图
         # (查特定产品文档时, item_name精确匹配是必要的)。
         expr_conditions = []
+        item_expr = None
         if query_type in ("doc", "knowledge") and item_names:
             item_expr = build_item_name_expr(item_names)
             if item_expr:
@@ -100,6 +101,12 @@ class NodeSearchEmbedding(NodeBase):
         elif query_type == "question":
             expr_conditions.append("content_type == 'question'")
         expr = " and ".join(expr_conditions) if expr_conditions else None
+        if item_expr:
+            fallback_expr = " and ".join(
+                condition for condition in expr_conditions if condition != item_expr
+            ) or None
+        else:
+            fallback_expr = expr
         # ==================== AI修改 结束 ====================
         reqs = create_reqs(
             dense_data=dense_data,
@@ -139,7 +146,34 @@ class NodeSearchEmbedding(NodeBase):
             limit=20
             # ==================== AI修改 结束 ====================
         )
-        # print(convert_to_json(res))
+        # ==================== AI修改 开始 ====================
+        # item_name 是文档归属名，而主体识别返回的是技术实体名；两者不一致时，
+        # 精确过滤会把本地相关 Chunk 全部过滤掉，零命中时退回无过滤向量检索。
+        if item_expr and not res[0]:
+            logger.warning(
+                f"本地向量检索主体过滤零命中，放宽为全库检索: item_names={item_names}"
+            )
+            reqs = create_reqs(
+                dense_data=dense_data,
+                sparse_data=sparse_data,
+                dense_anns_field="dense_vector",
+                sparse_anns_field="sparse_vector",
+                dense_param={"metric_type": "COSINE"},
+                sparse_param={"metric_type": "IP"},
+                expr=fallback_expr,
+            )
+            res = my_hybrid_search(
+                collection_name=collection_name,
+                reqs=reqs,
+                ranker=[0.9, 0.1],
+                output_fields=output_fields,
+                limit=20,
+            )
+        logger.info(
+            f"本地向量检索完成: collection={collection_name}, "
+            f"filter={expr or 'none'}, hits={len(res[0])}"
+        )
+        # ==================== AI修改 结束 ====================
 
         embedding_chunks = [
             {
@@ -157,9 +191,9 @@ class NodeSearchEmbedding(NodeBase):
 
 if __name__ == '__main__':
     init_state = {
-        "rewritten_query":"关于HAK180烫金机如何使用",
-        "item_names":["HAK180烫金机"]
+        "rewritten_query":"CNN是什么",
+        "item_names":["CNN"]
     }
     node = NodeSearchEmbedding()
-    res = node(init_state)
+    res = node.process(init_state)
     logger.info(convert_to_json(res))

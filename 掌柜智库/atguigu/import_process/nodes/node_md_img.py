@@ -27,7 +27,7 @@ from atguigu.tool.task_utils import (
 # 统一使用共享图片 URL 构造器，避免 endpoint 已带 http:// 时重复拼接协议，
 # 同时对中文、空格等文件名进行 URL 编码，保证前端 img.src 可以正常访问。
 # ==================== AI修改 结束 ====================
-from atguigu.tool.image_url_tool import build_minio_image_url
+from atguigu.tool.image_url_tool import build_minio_image_url, extract_image_references
 
 # ==================== AI修改 开始 ====================
 # 全局视觉模型信号量: 限制同时调用视觉模型(图片摘要生成)的并发数为2。
@@ -155,7 +155,28 @@ class NodeMDImg(NodeBase):
             os.makedirs(images_dir_path_obj)
         #列出该目录下所有文件,os.listdir()遍历该目录下的所有文件,遍历出来后返回的娥是一个列表
         #os.listdir传递path对象或者是字符串都可以,但是返回的就是一个字符串列表
-        image_name_list = os.listdir(images_dir_path_obj)
+        # ==================== AI修改 开始 ====================
+        # 只把真正的图片文件纳入处理；附件带相对路径时，不能把子目录当图片。
+        image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+        image_name_list = [
+            path.name for path in images_dir_path_obj.iterdir()
+            if path.is_file() and path.suffix.lower() in image_extensions
+        ]
+        relative_references = {
+            Path(reference.split("?", 1)[0].split("#", 1)[0].replace("\\", "/")).name
+            for reference in extract_image_references(md_content)
+            if not reference.startswith(("http://", "https://", "data:"))
+        }
+        missing_references = sorted(relative_references - set(image_name_list))
+        if missing_references:
+            raise FileNotFoundError(
+                "文档引用了图片但上传附件缺失: " + ", ".join(missing_references)
+                + "；请把 Markdown 和对应图片一起上传"
+            )
+        if not relative_references:
+            return {"md_content": md_content}
+        image_name_list = [name for name in image_name_list if name in relative_references]
+        # ==================== AI修改 结束 ====================
         # print(image_name_list)
         #如果没有图片,不需要处理图片,直接返回md文件内容
         if not image_name_list:
@@ -167,7 +188,6 @@ class NodeMDImg(NodeBase):
         #遍历所有图片
         #所有图片格式
         image_with_context_str_list = []
-        image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
         length = 200
         for image_name in image_name_list:
             #先判断该图片是否符合图片格式

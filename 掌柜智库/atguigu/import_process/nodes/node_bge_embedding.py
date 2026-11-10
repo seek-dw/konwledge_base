@@ -32,14 +32,9 @@ class NodeBGEEmbedding(NodeBase):
             batch_chunks = chunks[i:i+3]
             #拿到批量chunks内容
             # ==================== AI修改 开始 ====================
-            # 嵌入文本上下文增强(提升召回):
-            # 原来只有 "item_name + content",缺少file_title(文档名)上下文。
-            # 查询"安全手册里电源线怎么接"这类带文档指向的问题时,
-            # chunk向量里没有文件名信息就吃不到这部分匹配信号。
-            # 现在拼上file_title,向量同时编码[来自哪个文档+什么主体+什么内容],
-            # 这是Contextual Retrieval的标准做法,对稠密向量召回有直接增益
+            # 嵌入文本包含章节层级、主体和正文，保证每个切片自带结构上下文。
             batch_chunks_content = [
-                f"{chunk.get('file_title', '')} {chunk.get('item_name', '')} {chunk.get('content')}"
+                f"{chunk.get('section_path', '')} {chunk.get('item_name', '')} {chunk.get('content')}"
                 for chunk in batch_chunks
             ]
             # ==================== AI修改 结束 ====================

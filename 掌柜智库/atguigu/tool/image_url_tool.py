@@ -20,6 +20,16 @@ _IMAGE_SUFFIX_RE = re.compile(
 )
 
 # ==================== AI修改 开始 ====================
+# 图片 URL 后可能被模型或前端粘上下一句中文；图片后缀是可靠边界，
+# 只保留后缀和合法 ASCII 查询串，避免把整串误判成非图片。
+# ==================== AI修改 结束 ====================
+_IMAGE_URL_PREFIX_RE = re.compile(
+    r"^(.*?\.(?:png|jpe?g|gif|bmp|webp|svg)"
+    r"(?:[?#][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]*)?)",
+    re.IGNORECASE,
+)
+
+# ==================== AI修改 开始 ====================
 # 同时支持 Markdown 图片和 HTML img 标签，因为项目历史文档两种写法都存在。
 # ==================== AI修改 结束 ====================
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
@@ -124,6 +134,9 @@ def normalize_image_urls(values: list[str] | None) -> list[str]:
     result: list[str] = []
     for raw in values or []:
         value = str(raw or "").strip()
+        match = _IMAGE_URL_PREFIX_RE.match(value)
+        if match:
+            value = match.group(1)
         if value and _is_image_reference(value) and value not in result:
             result.append(value)
     return result

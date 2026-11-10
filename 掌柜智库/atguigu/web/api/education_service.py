@@ -6,6 +6,7 @@
 # ==================== AI修改 结束 ====================
 from __future__ import annotations
 
+import json
 import threading
 import traceback
 from pathlib import Path
@@ -23,6 +24,7 @@ from atguigu.edu_process.edu_parsers import (
     parse_question_md,
 )
 from atguigu.tool.logger import logger
+from atguigu.tool.mongo_client_tool import get_education_metadata
 from atguigu.tool.milvus_client_create import (
     ensure_collection_loaded,
     get_milvus_client,
@@ -43,11 +45,9 @@ _EDUCATION_RESULTS: dict[str, dict[str, Any]] = {}
 _EDUCATION_RESULTS_LOCK = threading.Lock()
 
 EDUCATION_OUTPUT_FIELDS = [
-    "id", "title", "content", "item_name", "content_type", "source_name",
-    "code", "q_type", "course_name", "course_code", "chapter_name",
-    "course_category", "target_users", "learning_goals", "project_name",
-    "question_bank_name", "question_bank_code", "question_code",
-    "question_type", "source_path",
+    "id", "chunk_id", "document_id", "source_type", "source_id",
+    "source_path", "item_name", "content_type", "chunk_index",
+    "section_path", "content",
 ]
 
 
@@ -70,15 +70,16 @@ def collect_education_import_inputs(
 
 def build_course_summary(chunk: dict[str, Any]) -> dict[str, Any]:
     """把 Milvus 课程 chunk 转成前端稳定使用的课程对象。"""
+    metadata = chunk.get("domain_metadata") or chunk
     return {
-        "course_name": chunk.get("course_name") or chunk.get("title") or "",
-        "course_code": chunk.get("course_code") or chunk.get("code") or "",
-        "chapter_name": chunk.get("chapter_name") or "",
-        "course_category": chunk.get("course_category") or "",
-        "target_users": chunk.get("target_users") or "",
-        "learning_goals": chunk.get("learning_goals") or "",
-        "project_name": chunk.get("project_name") or "",
-        "source_name": chunk.get("source_name") or "",
+        "course_name": metadata.get("course_name") or chunk.get("title") or chunk.get("section_path") or "",
+        "course_code": metadata.get("course_code") or metadata.get("code") or "",
+        "chapter_name": metadata.get("chapter_name") or "",
+        "course_category": metadata.get("course_category") or "",
+        "target_users": metadata.get("target_users") or "",
+        "learning_goals": metadata.get("learning_goals") or "",
+        "project_name": metadata.get("project_name") or "",
+        "source_name": chunk.get("source_path") or "",
         "source_path": chunk.get("source_path") or "",
         "content": chunk.get("content") or "",
     }
@@ -86,13 +87,14 @@ def build_course_summary(chunk: dict[str, Any]) -> dict[str, Any]:
 
 def build_question_summary(chunk: dict[str, Any]) -> dict[str, Any]:
     """把 Milvus 题目 chunk 转成前端题目卡片对象。"""
+    metadata = chunk.get("domain_metadata") or chunk
     return {
-        "question_bank_name": chunk.get("question_bank_name") or chunk.get("item_name") or "",
-        "question_bank_code": chunk.get("question_bank_code") or "",
-        "question_code": chunk.get("question_code") or chunk.get("code") or "",
-        "question_type": chunk.get("question_type") or chunk.get("q_type") or "",
-        "course_name": chunk.get("course_name") or "",
-        "source_name": chunk.get("source_name") or "",
+        "question_bank_name": metadata.get("question_bank_name") or chunk.get("item_name") or "",
+        "question_bank_code": metadata.get("question_bank_code") or "",
+        "question_code": metadata.get("question_code") or metadata.get("code") or "",
+        "question_type": metadata.get("question_type") or metadata.get("q_type") or "",
+        "course_name": metadata.get("course_name") or "",
+        "source_name": chunk.get("source_path") or "",
         "source_path": chunk.get("source_path") or "",
         "content": chunk.get("content") or "",
     }
@@ -163,23 +165,31 @@ def get_education_status(task_id: str) -> dict[str, Any]:
 
 
 def _query_education_chunks(content_type: str, limit: int = 100) -> list[dict[str, Any]]:
-    """读取教育 collection 的结构化记录；服务未启动时返回空列表。"""
+    """从 Mongo 取教育元数据，再按 chunk_id 回溯统一 Milvus Chunk。"""
     try:
         client = get_milvus_client()
-        # ==================== AI修改 开始 ====================
         collection = MilvusConfig.milvus_chunks_collection
-        # ==================== AI修改 结束 ====================
         if not client.has_collection(collection_name=collection):
             return []
         ensure_collection_loaded(collection)
-        return client.query(
+        metadata_rows = get_education_metadata(content_type, limit=500)
+        if not metadata_rows:
+            return []
+        chunk_ids = [row["chunk_id"] for row in metadata_rows]
+        chunks = client.query(
             collection_name=collection,
-            filter=f"content_type == '{content_type}'",
+            filter=f"chunk_id in {json.dumps(chunk_ids, ensure_ascii=False)}",
             output_fields=select_existing_output_fields(
                 client, collection, EDUCATION_OUTPUT_FIELDS
             ),
             limit=max(1, min(limit, 500)),
         )
+        chunks_by_id = {chunk.get("chunk_id"): chunk for chunk in chunks}
+        return [
+            {**chunks_by_id[row["chunk_id"]], "domain_metadata": row.get("domain_metadata", {})}
+            for row in metadata_rows
+            if row["chunk_id"] in chunks_by_id
+        ]
     except Exception as exc:
         logger.warning(f"教育结构化查询失败: {exc}")
         return []

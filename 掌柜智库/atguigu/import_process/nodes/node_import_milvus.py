@@ -33,17 +33,18 @@ class NodeImportMilvus(NodeBase):
         )
 
         # ==================== AI修改 开始 ====================
-        # 普通、教育和未来新增来源统一使用同一个正文 Collection；
-        # 来源差异只通过元数据表达，不再通过 state 切换不同 chunks 表。
+        # 来源身份是文档级元数据；file_title 只用于提示词，不写入统一 Chunk 表。
         metadata = {
             "document_id": document_id,
             "source_type": source_type,
             "source_id": source_id,
             "source_path": source_path,
-            "source_name": state.get("source_name") or file_title,
-            "file_hash": state.get("file_hash") or "",
-            "file_title": file_title,
+            "content_type": state.get("content_type")
+            or chunks[0].get("content_type")
+            or "doc",
         }
+        # 创建 kcs实例调用replace_document
+        # repalce_document内部完成了字段的兼容,表的创建,旧chunks的删除,新chunks的插入,添加上插入id返回的chunks的整理
         result = KnowledgeChunkStore(
             collection_name=MilvusConfig.milvus_chunks_collection,
         ).replace_document(

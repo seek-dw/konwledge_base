@@ -8,6 +8,7 @@ from atguigu.import_process.base import NodeBase
 from atguigu.import_process.state import ImportGraphState
 from atguigu.tool.logger import logger
 from atguigu.tool.convert_to_json import convert_to_json
+from atguigu.tool.knowledge_chunk_store import build_chunk_id
 
 
 class NodeDocumentSplit(NodeBase):
@@ -93,7 +94,10 @@ class NodeDocumentSplit(NodeBase):
         sections = self._merge_small_sections(sections)
 
         # 四、递归精切:区块内部超过上限再切,切完拼上面包屑前缀
-        final_section_list = self._fine_split(sections, file_title)
+        final_section_list = self._fine_split(
+            sections,
+            state.get("document_id") or file_title,
+        )
         # ==================== AI修改 结束 ====================
 
         return {"chunks": final_section_list}
@@ -217,7 +221,7 @@ class NodeDocumentSplit(NodeBase):
                 merged.append(dict(sec))
         return merged
 
-    def _fine_split(self, sections, file_title):
+    def _fine_split(self, sections, document_id):
         """
         递归精切:区块内部超过CHUNK_SIZE再细切,每个chunk的content都带上面包屑前缀。
         content = "面包屑路径\n\n正文片段"
@@ -232,6 +236,8 @@ class NodeDocumentSplit(NodeBase):
             chunk_size=self.CHUNK_SIZE,
             chunk_overlap=self.CHUNK_OVERLAP,
         )
+        # ==================== AI修改 开始 ====================
+        # chunk_index 在整篇文档内连续递增，chunk_id 因此能稳定用于图谱证据回溯。
         final_section_list = []
         for sec in sections:
             breadcrumb = sec["breadcrumb"]
@@ -247,22 +253,31 @@ class NodeDocumentSplit(NodeBase):
             is_small = len(body) <= self.CHUNK_SIZE
             is_small_table = "<table" in body and len(body) <= self.MAX_WHOLE_SECTION
             if is_small or is_small_table:
+                content = f"{breadcrumb}\n\n{body}"
                 final_section_list.append({
-                    "title": breadcrumb,
-                    "content": f"{breadcrumb}\n\n{body}",
-                    "file_title": file_title,
-                    "part": 0,
+                    "chunk_id": build_chunk_id(
+                        document_id, len(final_section_list), breadcrumb, content
+                    ),
+                    "document_id": document_id,
+                    "chunk_index": len(final_section_list),
+                    "section_path": breadcrumb,
+                    "content": content,
                 })
                 continue
             # ==================== AI修改 结束 ====================
             split_chunk_list = spliter.split_text(body)
-            for idx, split_chunk in enumerate(split_chunk_list, start=1):
+            for split_chunk in split_chunk_list:
+                content = f"{breadcrumb}\n\n{split_chunk}"
                 final_section_list.append({
-                    "title": breadcrumb,
-                    "content": f"{breadcrumb}\n\n{split_chunk}",
-                    "file_title": file_title,
-                    "part": idx,
+                    "chunk_id": build_chunk_id(
+                        document_id, len(final_section_list), breadcrumb, content
+                    ),
+                    "document_id": document_id,
+                    "chunk_index": len(final_section_list),
+                    "section_path": breadcrumb,
+                    "content": content,
                 })
+        # ==================== AI修改 结束 ====================
         return final_section_list
     # ==================== AI修改 结束 ====================
 

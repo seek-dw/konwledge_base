@@ -16,24 +16,17 @@ class NodeRerank(NodeBase):
     name: str = "node_rerank"
 
     def process(self, state: QueryGraphState):
-        print("========== 已经进入 process ==========")
         """
         节点逻辑
         :param state: 工作流状态对象
         :return: 更新后的状态对象
         """
-        rrf_chunks = state.get("rrf_chunks","")
-        web_search_docs= state.get("web_search_docs","")
-        # ==================== AI修改 开始 ====================
-        # 宽松校验：网络搜索失败/为空不应导致整个重排节点崩溃,只要求本地融合结果非空
-        # 2026-08-20 改: RRF结果为空(知识库无匹配数据)时同样不 raise,
-        # 降级返回空列表, 由 answer_output 走"无结果"兜底分支友好回复。
-        if not rrf_chunks:
-            logger.warning("Rerank 节点: RRF结果为空, 降级返回空结果(答案节点走无结果分支)")
+        rrf_chunks = state.get("rrf_chunks") or []
+        web_search_docs = state.get("web_search_docs") or []
+        # 本地无结果时仍要保留 Web-only 检索结果；两路都为空才直接降级。
+        if not rrf_chunks and not web_search_docs:
+            logger.warning("Rerank 节点: 本地和 Web 检索结果均为空")
             return {"reranked_docs": []}
-        if not web_search_docs:
-            web_search_docs = []
-        # ==================== AI修改 结束 ====================
 
         #列表相加
         merge_chunks = rrf_chunks + web_search_docs
@@ -65,35 +58,31 @@ class NodeRerank(NodeBase):
 
         merge_chunks = [{
             #""属于假值,不会触发or短路
-            "title":chunk.get("item_name","") or chunk.get("title",""),
+            "id": chunk.get("id", chunk.get("chunk_id", "")),
+            "chunk_id": chunk.get("chunk_id", ""),
+            "document_id": chunk.get("document_id", ""),
+            "source_type": chunk.get("source_type", ""),
+            "source_id": chunk.get("source_id", ""),
+            "section_path": chunk.get("section_path") or chunk.get("item_name", ""),
             "content":chunk.get("content",""),
             "url":chunk.get("url",""),
             "source":chunk.get("source",""),
             # ==================== AI修改 开始 ====================
+            # 保留向量/RRF/Graph 的原始分数；Rerank 失败时依靠它稳定降级。
+            "score": chunk.get("score", 0.0) or 0.0,
+            # ==================== AI修改 结束 ====================
+            "item_name": chunk.get("item_name", ""),
+            "graph_path": chunk.get("graph_path", []),
+            # ==================== AI修改 开始 ====================
             # 透传教育元数据字段,供答案生成节点组装【来源】引用
             "content_type":chunk.get("content_type",""),
-            "source_name":chunk.get("source_name",""),
-            "code":chunk.get("code",""),
-            "q_type":chunk.get("q_type",""),
+            "source_path": chunk.get("source_path", ""),
             # ==================== AI修改 开始 ====================
             # 教育结构化字段透传到答案节点，来源展示不再依赖正文猜测。
-            "course_name": chunk.get("course_name", ""),
-            "course_code": chunk.get("course_code", ""),
-            "chapter_name": chunk.get("chapter_name", ""),
-            "course_category": chunk.get("course_category", ""),
-            "target_users": chunk.get("target_users", ""),
-            "learning_goals": chunk.get("learning_goals", ""),
-            "project_name": chunk.get("project_name", ""),
-            "question_bank_name": chunk.get("question_bank_name", ""),
-            "question_bank_code": chunk.get("question_bank_code", ""),
-            "question_code": chunk.get("question_code", ""),
-            "question_type": chunk.get("question_type", ""),
-            "source_path": chunk.get("source_path", ""),
             # ==================== AI修改 结束 ====================
             # ==================== AI修改 结束 ====================
         }
             for chunk in merge_chunks]
-        # print(convert_to_json(merge_chunks))
         # 已经获取到合并的chunk,现在准备重排序模型参数,送入重排序模型
 
         rewritten_query = state.get("rewritten_query","")
@@ -105,19 +94,17 @@ class NodeRerank(NodeBase):
         # 送入重排序模型进行重排序
         # query问题 texts相关文档, 输出index:原文档的输入顺序 ,score:问题与原文档的相关性分数
         res = rerank(query = rewritten_query, texts = texts,limit = len(merge_chunks))
-        print(convert_to_json(res))
-
         # 更新原来每个chunk中的分数
 
         for i in res:
-            merge_chunks[i.get("index")]["score"]= i.get("score")
+            merge_chunks[i.get("index")]["score"] = i.get(
+                "score", merge_chunks[i.get("index")].get("score", 0.0)
+            ) or 0.0
 
         # ==================== AI修改 开始 ====================
         # 排序默认值由空字符串改为0.0,防止KeyError/TypeError
         rerank_merge_chunks = sorted(merge_chunks,key = lambda x:x.get("score",0.0),reverse=True)
         # ==================== AI修改 结束 ====================
-        # print(convert_to_json(rerank_merge_chunks))
-
         # 断崖检测
         #动态上限 大写表示常量,该值不应该被修改
         RERANK_MAX_TOPK : int = 20
@@ -137,7 +124,10 @@ class NodeRerank(NodeBase):
             current_score = rerank_merge_chunks[i]["score"]
             next_score = rerank_merge_chunks[i+1]["score"]
             abs_gap = abs(current_score - next_score)
-            ratio_gap = abs_gap / current_score
+            # ==================== AI修改 开始 ====================
+            # Rerank 服务失败时分数保持 0.0；零分结果仍应正常降级，不能除零让整条查询失败。
+            ratio_gap = abs_gap / current_score if current_score > 0 else 0.0
+            # ==================== AI修改 结束 ====================
             if abs_gap > RERANK_GAP_ABS or ratio_gap > RERANK_GAP_RATIO:
                 cliff_chunks =  rerank_merge_chunks[:i+1]
                 break

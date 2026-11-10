@@ -58,8 +58,6 @@ class NodeEntry(NodeBase):
             "source_type": source_type,
             "source_id": source_id,
             "source_path": source_path,
-            "source_name": state.get("source_name") or file_title,
-            "file_hash": state.get("file_hash") or "",
         }
         # ==================== AI修改 结束 ====================
         if suffix == ".md":

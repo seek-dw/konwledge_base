@@ -1,4 +1,8 @@
 import time
+# ==================== AI修改 开始 ====================
+# 取消事件与查询任务同生命周期，供前后端协作终止工作流。
+import threading
+# ==================== AI修改 结束 ====================
 from collections import defaultdict
 from queue import Queue
 from typing import Any, Dict, List, Optional
@@ -49,6 +53,17 @@ TASK_STATUS_FAILED = "failed"
 # 只是因模型限流暂时等待下一次重试。两者都不应该被前端解释成空状态。
 TASK_STATUS_QUEUED = "queued"
 TASK_STATUS_WAITING_RESPONSE = "waiting_response"
+# ==================== AI修改 开始 ====================
+# 用户主动停止与服务失败是两种不同结果，前端需要单独展示 cancelled。
+TASK_STATUS_CANCELLED = "cancelled"
+_cancel_events: Dict[str, threading.Event] = {}
+
+
+class TaskCancelledError(Exception):
+    """查询被用户停止后，用于终止 LangGraph 后续节点。"""
+
+
+# ==================== AI修改 结束 ====================
 # ==================== AI修改 结束 ====================
 
 # 节点名 -> 中文名映射（用于前端展示）
@@ -62,7 +77,10 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
     "node_document_split": "文档切分",
     "node_bge_embedding": "向量生成",
     "node_import_milvus": "导入向量库",
-
+    # ==================== AI修改 开始 ====================
+    # Graph Build 是导入链的最后一步，必须和前端保持同一中文名称。
+    "node_graph_build": "构建知识图谱",
+    # ==================== AI修改 结束 ====================
     # --- Query 流程节点---
     "node_item_name_confirm": "确认问题产品",
     "node_answer_output": "生成答案",
@@ -124,6 +142,24 @@ def add_done_task(task_id: str, node_name: str) -> None:
     # 3. 将当前节点加入已完成列表（做去重判断，防止重复标记）
     if node_name not in done:
         done.append(node_name)
+
+
+# ==================== AI修改 开始 ====================
+def remove_running_task(task_id: str, node_name: str) -> None:
+    """取消时移除运行中的节点，但不把它伪装成已完成。"""
+    if node_name in _tasks_running_list[task_id]:
+        _tasks_running_list[task_id].remove(node_name)
+
+
+def cancel_task(task_id: str) -> None:
+    """设置协作式取消标记，并立即让状态接口可观察。"""
+    _cancel_events.setdefault(task_id, threading.Event()).set()
+    update_task_status(task_id, TASK_STATUS_CANCELLED, {"message": "查询已停止"})
+
+
+def is_task_cancelled(task_id: str) -> bool:
+    return _cancel_events.get(task_id, threading.Event()).is_set()
+# ==================== AI修改 结束 ====================
 
 
 
@@ -288,6 +324,7 @@ queue_dict:Dict[str,Queue]= {}
 def create_queue(task_id):
     if not queue_dict.get(task_id):
         queue_dict[task_id] = Queue()
+    _cancel_events.setdefault(task_id, threading.Event())
 
 #向队列中添加数据
 def put_data(task_id,event,data):

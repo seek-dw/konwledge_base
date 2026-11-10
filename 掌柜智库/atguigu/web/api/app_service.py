@@ -32,10 +32,11 @@ import asyncio
 import json
 import re
 import shutil
+import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, List
 
 import uvicorn
@@ -50,10 +51,17 @@ from starlette.responses import StreamingResponse
 # 两个 main_graph 同名类, 起别名避免互相覆盖
 from atguigu.import_process.main_graph import MainGraphRunner as ImportGraphRunner
 from atguigu.query_process.main_graph import MainGraphRunner as QueryGraphRunner
-from atguigu.config.config import MinioConfig, build_runtime_temp_path
+from atguigu.config.config import MinioConfig, ModelConfig, build_runtime_temp_path
 from atguigu.tool.logger import logger
 from atguigu.tool.minio_client_tool import create_minio_client
-from atguigu.tool.mongo_client_tool import get_recent_history_list, clear_history
+# ==================== AI修改 开始 ====================
+# 导入任务通过 Mongo 记录跨 Milvus/Neo4j 的同步状态。
+from atguigu.tool.mongo_client_tool import (
+    clear_history,
+    get_recent_history_list,
+    mark_knowledge_sync,
+)
+# ==================== AI修改 结束 ====================
 from atguigu.tool.session_catalog import (
     delete_session_catalog,
     list_session_catalog,
@@ -73,6 +81,7 @@ from atguigu.web.api.knowledge_service import (
 )
 # ==================== AI修改 开始 ====================
 from atguigu.tool.knowledge_chunk_store import (
+    build_document_id,
     build_local_source_identity,
     build_upload_source_identity,
 )
@@ -83,6 +92,10 @@ from atguigu.tool.task_utils import (
     # ==================== AI修改 开始 ====================
     # 任务进入线程池后先标记 queued，避免排队期间 /status 返回空字符串。
     TASK_STATUS_QUEUED,
+    TASK_STATUS_CANCELLED,
+    TaskCancelledError,
+    cancel_task,
+    is_task_cancelled,
     # ==================== AI修改 结束 ====================
     update_task_status, add_running_task, add_done_task,
     # ==================== AI修改 开始 ====================
@@ -91,6 +104,13 @@ from atguigu.tool.task_utils import (
     # ==================== AI修改 结束 ====================
     set_task_error,
 )
+
+# ==================== AI修改 开始 ====================
+# 浏览器可能把附件的相对路径作为 filename 提交；上传接口只需要文件名，
+# 否则 images/xxx.png 会被保存成任务目录/images/images/xxx.png。
+def _uploaded_basename(filename: str | None) -> str:
+    return PurePosixPath(str(filename or "").replace("\\", "/")).name
+# ==================== AI修改 结束 ====================
 
 app = FastAPI(title="掌柜智库 · 一体化服务")
 
@@ -101,6 +121,7 @@ app = FastAPI(title="掌柜智库 · 一体化服务")
 class KnowledgeDirectoryDeleteParams(BaseModel):
     source_path: str = Field(..., min_length=1, description="来源目录前缀")
     source_type: str | None = Field(default=None, description="可选来源类型")
+    source_id: str = Field(..., min_length=1, description="来源实例")
 
 
 @app.delete("/knowledge/documents/{document_id}")
@@ -110,12 +131,14 @@ async def delete_knowledge_document(document_id: str):
 
 @app.delete("/knowledge/sources/{source_type}")
 async def delete_knowledge_source(source_type: str, source_id: str | None = None):
+    if not str(source_id or "").strip():
+        raise HTTPException(status_code=400, detail="删除来源必须提供 source_id")
     return delete_source_chunks(source_type, source_id)
 
 
 @app.delete("/knowledge/directories")
 async def delete_knowledge_directory(body: KnowledgeDirectoryDeleteParams):
-    return delete_directory_chunks(body.source_path, body.source_type)
+    return delete_directory_chunks(body.source_path, body.source_type, body.source_id)
 # ==================== AI修改 结束 ====================
 
 app.add_middleware(
@@ -203,7 +226,12 @@ async def delete_session(session_id: Annotated[str, PathParam(..., description="
 @app.get("/history/{session_id}")
 async def send_history(session_id: Annotated[str, PathParam(..., description="会话ID")]):
     # 直接通过定义好的方法拿出历史记录返回给前端
-    history_list = get_recent_history_list(session_id, limit=10)
+    # ==================== AI修改 开始 ====================
+    # 刷新页面与查询节点统一读取同一个历史窗口，默认呈现最近20条消息。
+    history_list = get_recent_history_list(
+        session_id, limit=ModelConfig.QUERY_HISTORY_LIMIT
+    )
+    # ==================== AI修改 结束 ====================
     history_list = sorted(history_list, key=lambda x: x["ts"])
     # 历史记录里面的id是一个对象,这里要把id转为字符串
     history_list = [{
@@ -250,11 +278,19 @@ def ask_question_search(task_id, query, session_id):
             "original_query": query,
             "session_id": session_id
         }
+        if is_task_cancelled(task_id):
+            raise TaskCancelledError()
         update_task_status(task_id, TASK_STATUS_PROCESSING)
         put_data(task_id, event="progress", data=get_task_info(task_id))
         QueryGraphRunner.create_and_run(init_state)
+        if is_task_cancelled(task_id):
+            raise TaskCancelledError()
         update_task_status(task_id, TASK_STATUS_COMPLETED)
         put_data(task_id, event="progress", data=get_task_info(task_id))
+    except TaskCancelledError:
+        update_task_status(task_id, TASK_STATUS_CANCELLED, {"message": "查询已停止"})
+        put_data(task_id, event="progress", data=get_task_info(task_id))
+        put_data(task_id, "final", {"answer": "本次查询已停止。", "cancelled": True})
     except Exception as e:
         update_task_status(task_id, TASK_STATUS_FAILED)
         put_data(task_id, event="error", data=get_task_info(task_id))
@@ -272,6 +308,11 @@ async def ask_question(
     # 创建任务id,一定要加str不然就是个对象,前端根本拿不到任何东西
     task_id = str(uuid.uuid4())
     # ==================== AI修改 开始 ====================
+    # 每次提问都刷新会话更新时间；已有标题由目录工具自动保留。
+    try:
+        upsert_session_catalog(body.session_id, body.query, preserve_title=True)
+    except Exception as exc:
+        logger.warning(f"刷新会话目录失败: {exc}")
     # ==================== AI修改 结束 ====================
     # 添加后台任务
     bgt.add_task(ask_question_search, task_id, body.query, body.session_id)
@@ -280,6 +321,17 @@ async def ask_question(
         "query": body.query,
         "session_id": body.session_id
     }
+
+
+# ==================== AI修改 开始 ====================
+@app.post("/query/{task_id}/cancel")
+async def cancel_query(task_id: Annotated[str, PathParam(..., description="查询任务ID")]):
+    """设置协作式取消标记；正在进行的单次外部请求会在返回后退出。"""
+    create_queue(task_id)
+    cancel_task(task_id)
+    put_data(task_id, event="progress", data=get_task_info(task_id))
+    return {"task_id": task_id, "status": TASK_STATUS_CANCELLED}
+# ==================== AI修改 结束 ====================
 
 
 # ==================== AI修改 开始 ====================
@@ -328,10 +380,24 @@ async def education_import_api(
         str(course_path) if course_path else None,
         str(question_path) if question_path else None,
     )
-    return {
-        "task_id": task_id,
-        "sources": [name for name, file in (("course", course_path), ("question", question_path)) if file],
-    }
+    sources = []
+    for source_name, source_path in (
+        ("课程介绍", course_path),
+        ("题目资料", question_path),
+    ):
+        if source_path:
+            sources.append({
+                "source_type": "education",
+                "source_id": source_name,
+                "source_path": source_name,
+                "source_name": Path(source_path).name,
+                "document_id": build_document_id(
+                    "education",
+                    source_name,
+                    source_name,
+                ),
+            })
+    return {"task_id": task_id, "sources": sources}
 
 
 @app.get("/education/status/{task_id}")
@@ -389,7 +455,27 @@ def run_graph(
         # ==================== AI修改 结束 ====================
 ):
     # main_graph中途若失败,则抛出异常被base接收,再被这里的try接收,返回前端上传失败状态
+    document_id = build_document_id(source_type, source_id, source_path)
+
+    # ==================== AI修改 开始 ====================
+    # Mongo 只记录导入状态，不参与 Milvus/Neo4j 事务；状态写失败不能覆盖真正的导入异常。
+    def record_sync(status, error=""):
+        try:
+            mark_knowledge_sync(
+                document_id=document_id,
+                status=status,
+                task_id=task_id,
+                source_type=source_type,
+                source_id=source_id,
+                source_path=source_path,
+                error=error,
+            )
+        except Exception as sync_error:
+            logger.warning(f"知识库同步状态写入失败: document_id={document_id}, error={sync_error}")
+    # ==================== AI修改 结束 ====================
+
     try:
+        record_sync("processing")
         init_state = {
             "task_id": task_id,
             "local_file_path": local_file_path,
@@ -402,9 +488,11 @@ def run_graph(
         # 更新总状态,执行main_graph之前总状态为process
         update_task_status(task_id, TASK_STATUS_PROCESSING)
         ImportGraphRunner.create_runner(init_state)
+        record_sync("synced")
         # 更新总状态,执行main_graph之后总状态为complete
         update_task_status(task_id, TASK_STATUS_COMPLETED)
     except Exception as e:
+        record_sync("failed", str(e)[:1000])
         update_task_status(task_id, TASK_STATUS_FAILED)
         # ==================== AI修改 开始 ====================
         # 原来只打 {e}(异常str), 不打完整调用栈, 排查困难。
@@ -445,7 +533,7 @@ async def upload_api(
     main_doc = None
     image_files = []
     for f in files:
-        suffix = Path(f.filename).suffix.lower()
+        suffix = Path(_uploaded_basename(f.filename)).suffix.lower()
         if main_doc is None and suffix in doc_suffixes:
             main_doc = f
         elif suffix in image_suffixes:
@@ -455,7 +543,7 @@ async def upload_api(
     # ==================== AI修改 开始 ====================
     # 文件可能来自浏览器提交的路径字符串，落盘前只保留文件名，避免
     # 临时任务目录或用户传入的路径片段进入文档身份和保存路径。
-    main_doc_name = Path(main_doc.filename or "upload.md").name
+    main_doc_name = _uploaded_basename(main_doc.filename) or "upload.md"
     upload_source_id, upload_source_path = build_upload_source_identity(main_doc.filename)
     # ==================== AI修改 结束 ====================
 
@@ -493,7 +581,10 @@ async def upload_api(
         images_dir_obj = task_dir_obj / "images"
         images_dir_obj.mkdir(parents=True, exist_ok=True)
         for img in image_files:
-            img_path = images_dir_obj / img.filename
+            img_name = _uploaded_basename(img.filename)
+            if not img_name:
+                continue
+            img_path = images_dir_obj / img_name
             with open(img_path, "wb") as f:
                 shutil.copyfileobj(img.file, f, 1024 * 1024)
         logger.info(f"附属图片保存成功，共{len(image_files)}张，目录为：{images_dir_obj}")
@@ -503,10 +594,10 @@ async def upload_api(
     minio_client = create_minio_client()
     minio_client.fput_object(
         bucket_name=MinioConfig.MINIO_BUCKET_NAME,
-        object_name=f"back_up/{datetime.now().strftime('%Y-%m-%d')}/{task_id}/{main_doc.filename}",
+        object_name=f"back_up/{datetime.now().strftime('%Y-%m-%d')}/{task_id}/{main_doc_name}",
         file_path=local_file_path
     )
-    logger.info(f"文件已备份到：{MinioConfig.MINIO_BUCKET_NAME}, object_name为：back_up/{datetime.now().strftime('%Y-%m-%d')}/{task_id}/{main_doc.filename}")
+    logger.info(f"文件已备份到：{MinioConfig.MINIO_BUCKET_NAME}, object_name为：back_up/{datetime.now().strftime('%Y-%m-%d')}/{task_id}/{main_doc_name}")
 
     # 添加节点状态流转监控:这里文件上传结束,将其加入done字典列表,并从running字典列表中删除
     add_done_task(task_id, "upload_file")
@@ -521,7 +612,17 @@ async def upload_api(
         upload_source_path,
     )
 
-    return {"task_id": task_id}
+    return {
+        "task_id": task_id,
+        "source_type": "document",
+        "source_id": upload_source_id,
+        "source_path": upload_source_path,
+        "document_id": build_document_id(
+            "document",
+            upload_source_id,
+            upload_source_path,
+        ),
+    }
 
 
 # 定义前端访问状态接口,所有信息都在里面,前端拿到包含所有信息的字典后进行页面展示
@@ -575,6 +676,68 @@ def _extract_img_refs(text: str) -> set:
     return refs
 
 
+def _safe_obsidian_upload_path(filename: str | None) -> tuple[str, PurePosixPath]:
+    """Return the Vault root and a safe path relative to that root."""
+    normalized = str(filename or "").replace("\\", "/")
+    path = PurePosixPath(normalized)
+    parts = path.parts
+    if (
+        len(parts) < 2
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in parts)
+        or ":" in parts[0]
+    ):
+        raise HTTPException(status_code=400, detail="Obsidian 上传文件路径无效")
+    return parts[0], PurePosixPath(*parts[1:])
+
+
+@app.post("/upload_obsidian")
+async def upload_obsidian(
+        bg_task: BackgroundTasks,
+        files: Annotated[List[UploadFile], File(..., description="Obsidian Vault 文件")],
+        dry_run: bool = False):
+    """Receive a browser-selected Vault and import only its Markdown/images."""
+    allowed_suffixes = {".md", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+    vault_name = None
+    accepted_files = []
+    markdown_count = 0
+
+    for upload in files:
+        root_name, relative_path = _safe_obsidian_upload_path(upload.filename)
+        if vault_name is None:
+            vault_name = root_name
+        elif vault_name != root_name:
+            raise HTTPException(status_code=400, detail="一次只能上传一个 Obsidian Vault")
+        if relative_path.suffix.lower() not in allowed_suffixes:
+            continue
+        accepted_files.append((upload, relative_path))
+        if relative_path.suffix.lower() == ".md":
+            markdown_count += 1
+
+    if not vault_name or markdown_count == 0:
+        raise HTTPException(status_code=400, detail="上传的 Vault 中没有找到 Markdown 笔记")
+
+    source_id = f"browser-upload:{vault_name}"
+    with tempfile.TemporaryDirectory(prefix="obsidian-upload-") as temp_dir:
+        vault_root = Path(temp_dir) / vault_name
+        for upload, relative_path in accepted_files:
+            destination = vault_root / Path(relative_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            stream = getattr(upload, "file", None)
+            if stream is None:
+                continue
+            stream.seek(0)
+            with destination.open("wb") as output:
+                shutil.copyfileobj(stream, output, 1024 * 1024)
+        return await _import_directory(
+            bg_task,
+            str(vault_root),
+            "obsidian",
+            dry_run,
+            source_id=source_id,
+        )
+
+
 # 本地批量导入用线程池并发跑导入管线(而非 FastAPI BackgroundTasks 的串行机制),
 # 与前端"批量上传=并发多个请求"的体验保持一致; 限制并发数避免 embedding/显存打爆。
 # ==================== AI修改 结束 ====================
@@ -599,13 +762,22 @@ async def import_local(
         bg_task: BackgroundTasks,
         body: Annotated[LocalImportParams, Body(..., description="本地文件夹路径")],
         dry_run: bool = False):
+    return await _import_directory(bg_task, body.dir, "document", dry_run)
+
+
+async def _import_directory(
+        bg_task: BackgroundTasks,
+        raw_dir: str,
+        source_type: str,
+        dry_run: bool = False,
+        source_id: str | None = None):
     # dry_run=True: 只扫描+配对图片+落盘, 不做minio备份也不跑导入管线(验证路径用)
     # 去掉两端引号/空格(用户从资源管理器复制路径时常带引号)
-    root = Path(body.dir.strip().strip('"').strip("'"))
+    root = Path(raw_dir.strip().strip('"').strip("'"))
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=400, detail=f"目录不存在或不是文件夹: {root}")
 
-    doc_suffixes = {".md", ".pdf", ".docx"}
+    doc_suffixes = {".md"} if source_type == "obsidian" else {".md", ".pdf", ".docx"}
     image_suffixes = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 
     # 递归收集目录下所有文件, 分成主文档和图片索引(图片按文件名索引, md里引用的就是文件名)
@@ -633,8 +805,12 @@ async def import_local(
         # 主文档拷贝到任务目录(与 /upload 的落盘结构完全一致)
         local_file_path = str(task_dir / doc.name)
         # ==================== AI修改 开始 ====================
-        # 文档身份使用原始目录和相对路径；task_dir 只用于本次运行的临时文件。
-        source_id, source_path = build_local_source_identity(source_root, doc)
+        # 文档身份使用来源实例和目录内相对路径；task_dir 只用于本次运行。
+        if source_id:
+            source_path = doc.resolve().relative_to(source_root).as_posix()
+        else:
+            source_id, source_path = build_local_source_identity(source_root, doc)
+        document_id = build_document_id(source_type, source_id, source_path)
         # ==================== AI修改 结束 ====================
         shutil.copy2(doc, local_file_path)
 
@@ -656,7 +832,15 @@ async def import_local(
 
         # dry_run 模式到此为止(不备份不跑管线), 正常模式以下与 /upload 完全一致
         if dry_run:
-            tasks.append({"task_id": task_id, "filename": doc.name, "images": n_images})
+            tasks.append({
+                "task_id": task_id,
+                "filename": doc.name,
+                "images": n_images,
+                "source_type": source_type,
+                "source_id": source_id,
+                "source_path": source_path,
+                "document_id": document_id,
+            })
             continue
 
         # 以下与 /upload 完全一致: minio备份 + 节点监控 + 后台graph
@@ -689,17 +873,30 @@ async def import_local(
             task_id,
             local_file_path,
             str(task_dir),
-            "document",
+            source_type,
             source_id,
             source_path,
         )
         _pending_futures.add(fut)
         fut.add_done_callback(_pending_futures.discard)
         # ==================== AI修改 结束 ====================
-        tasks.append({"task_id": task_id, "filename": doc.name, "images": n_images})
+        tasks.append({
+            "task_id": task_id,
+            "filename": doc.name,
+            "images": n_images,
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_path": source_path,
+            "document_id": document_id,
+        })
 
     logger.info(f"本地目录导入提交: {root}, 共{len(tasks)}个文档")
-    return {"tasks": tasks, "total": len(tasks)}
+    return {
+        "tasks": tasks,
+        "total": len(tasks),
+        "source_type": source_type,
+        "source_id": source_id or source_root.as_posix(),
+    }
 # ==================== AI修改 结束 ====================
 
 

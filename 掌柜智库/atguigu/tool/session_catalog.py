@@ -42,11 +42,14 @@ def merge_session_catalog_rows(
     for row in list(remote_rows or []) + list(local_rows or []):
         session_id = row.get("session_id")
         if session_id:
-            merged[session_id] = {
+            candidate = {
                 "session_id": session_id,
                 "title": row.get("title") or "新会话",
                 "updated_ts": row.get("updated_ts", 0),
             }
+            current = merged.get(session_id)
+            if current is None or candidate["updated_ts"] >= current["updated_ts"]:
+                merged[session_id] = candidate
     return sorted(
         merged.values(),
         key=lambda row: row.get("updated_ts", 0),
@@ -64,9 +67,25 @@ def _get_catalog_collection():
     return collection
 
 
-def upsert_session_catalog(session_id: str, title: str) -> dict:
+def upsert_session_catalog(
+        session_id: str,
+        title: str,
+        preserve_title: bool = False,
+) -> dict:
     """新建或刷新会话目录记录。"""
     record = build_session_record(session_id, title)
+    if preserve_title:
+        with _LOCAL_SESSION_CATALOG_LOCK:
+            current = _LOCAL_SESSION_CATALOG.get(session_id)
+        if current and current.get("title") not in {"新会话", "当前会话"}:
+            record["title"] = current["title"]
+        else:
+            try:
+                current = _get_catalog_collection().find_one({"session_id": session_id})
+                if current and current.get("title") not in {"新会话", "当前会话"}:
+                    record["title"] = current["title"]
+            except Exception:
+                pass
     # ==================== AI修改 开始 ====================
     # 先写入进程内目录，Mongo短暂断开时新会话仍能立即显示在左侧列表。
     with _LOCAL_SESSION_CATALOG_LOCK:

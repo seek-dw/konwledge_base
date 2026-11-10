@@ -20,6 +20,8 @@ def mongo_client_create():
 
 collection = None
 db = None
+_education_metadata_collection = None
+_knowledge_sync_collection = None
 
 #定义获取mongo集合的函数,传入的参数就是集合的名字,默认值为"chat_history"
 def get_mongo_collection(collection_name="chat_history"):
@@ -37,6 +39,70 @@ def get_mongo_collection(collection_name="chat_history"):
         #创建联合索引:代表_id 升序,ts降序,session_id升序索引结构
         collection.create_index([("_id",1),("ts",-1),("session_id",1)])
     return collection
+
+
+# ==================== AI修改 开始 ====================
+# 教育字段属于领域元数据，不进入 Milvus 主 Chunk 表。
+def get_education_metadata_collection():
+    global _education_metadata_collection
+    if _education_metadata_collection is None:
+        client = mongo_client_create()
+        education_db = client[MongoConfig.mongo_db_name]
+        _education_metadata_collection = education_db["education_metadata"]
+        _education_metadata_collection.create_index(
+            [("document_id", 1), ("chunk_id", 1)], unique=True
+        )
+    return _education_metadata_collection
+
+
+def replace_education_metadata(document_id, rows):
+    collection = get_education_metadata_collection()
+    collection.delete_many({"document_id": document_id})
+    if rows:
+        collection.insert_many(rows)
+
+
+def get_education_metadata(content_type, limit=500):
+    return list(
+        get_education_metadata_collection()
+        .find({"content_type": content_type}, {"_id": 0})
+        .sort("chunk_index", 1)
+        .limit(limit)
+    )
+# ==================== AI修改 结束 ====================
+
+
+# ==================== AI修改 开始 ====================
+# 记录同一 document_id 在 Milvus/Neo4j 导入链中的最后同步状态，便于失败后定位。
+def mark_knowledge_sync(
+    document_id,
+    status,
+    task_id="",
+    source_type="",
+    source_id="",
+    source_path="",
+    error="",
+):
+    global _knowledge_sync_collection
+    if _knowledge_sync_collection is None:
+        client = mongo_client_create()
+        _knowledge_sync_collection = client[MongoConfig.mongo_db_name]["knowledge_sync"]
+        _knowledge_sync_collection.create_index("document_id", unique=True)
+    _knowledge_sync_collection.update_one(
+        {"document_id": document_id},
+        {"$set": {
+            "document_id": document_id,
+            "status": status,
+            "task_id": task_id,
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_path": source_path,
+            "error": error,
+            "updated_at": time.time(),
+        }},
+        upsert=True,
+    )
+# ==================== AI修改 结束 ====================
 
 def get_recent_history_list(session_id,limit = 10):
     #获取mongo里面指定的集合,默认为"chat_history"
@@ -186,6 +252,7 @@ def compress_session_history(session_id, llm, keep_recent=12, compress_batch=6):
     压缩失败不影响主流程, 只记日志。
     并发安全: 全局 _compress_lock 串行化, 防止多轮并发压缩竞态误删近期记录。
     """
+    # blocking=false如果锁被其他线程占用,不等待
     if not _compress_lock.acquire(blocking=False):
         # 上一个压缩还在进行中(LLM压缩通常要几秒), 直接放弃本次,
         # 下次回答触发时再压, 避免堆积的压缩线程并发删除

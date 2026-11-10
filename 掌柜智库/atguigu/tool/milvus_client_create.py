@@ -8,14 +8,11 @@ from atguigu.tool.logger import logger
 milvus_client = None
 
 # ==================== AI修改 开始 ====================
-# 正文检索和 HyDE 共用这组字段；schema 不同的旧集合再由筛选函数取交集。
+# 正文检索和 HyDE 共用统一字段；教育专属信息从 MongoDB 按 document_id/chunk_id 读取。
 CHUNK_OUTPUT_FIELDS = (
-    "id", "title", "file_title", "content", "item_name",
-    "content_type", "source_name", "code", "q_type",
-    "course_name", "course_code", "chapter_name",
-    "course_category", "target_users", "learning_goals",
-    "project_name", "question_bank_name", "question_bank_code",
-    "question_code", "question_type", "source_path",
+    "id", "chunk_id", "document_id", "source_type", "source_id",
+    "source_path", "item_name", "content_type", "chunk_index",
+    "section_path", "content",
 )
 
 

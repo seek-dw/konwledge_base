@@ -12,11 +12,12 @@
 #   真正导入(去掉--dry-run,预计十几分钟):
 #     python -m atguigu.edu_process.edu_import --course 课程介绍.md --question 题目资料.md
 #
-# 【注意】正文 chunks 统一写入 knowledge_chunks；如果旧表仍是历史 schema，
-#         请先删除旧普通/教育 chunks collection，再重新导入全部资料。
+# 【注意】正文 chunks 统一写入 knowledge_chunks_graph；旧集合保留不动，
+#         首次使用新集合需要重新导入资料。
 # ==================== AI修改 结束 ====================
 import argparse
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pymilvus import DataType
 
 from atguigu.config.config import MilvusConfig
@@ -27,14 +28,42 @@ from atguigu.edu_process.edu_parsers import (
 )
 # 关键复用: chunks入库直接调用统一知识存储模块
 # (建表/按document_id替换/字段校验/批量插入和前端导入使用同一条路)
-from atguigu.tool.knowledge_chunk_store import KnowledgeChunkStore, build_document_id
+from atguigu.tool.knowledge_chunk_store import (
+    KnowledgeChunkStore,
+    build_chunk_id,
+    build_document_id,
+)
 from atguigu.tool.bgem3_create_tool import vectorize_texts
 from atguigu.tool.logger import logger
 from atguigu.tool.milvus_client_create import get_milvus_client, ensure_collection_loaded
+from atguigu.tool.mongo_client_tool import replace_education_metadata
+from atguigu.import_process.nodes.node_graph_build import NodeGraphBuild
 
 # 每批向量化3条。BGE-M3对批量大小敏感,3是与node_bge_embedding节点一致的稳妥值,
 # 太大容易触发embedding服务限频/超时
 BATCH_SIZE = 3
+EDUCATION_CHUNK_SIZE = 4500
+
+
+# ==================== AI修改 开始 ====================
+def split_education_chunks(chunks):
+    """在向量化前把超长教育正文切到统一 Milvus 上限以内。"""
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=EDUCATION_CHUNK_SIZE,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", "。", "！", "？", ";", " ", ""],
+    )
+    result = []
+    for chunk in chunks:
+        content = str(chunk.get("content") or "")
+        pieces = splitter.split_text(content) if len(content) > EDUCATION_CHUNK_SIZE else [content]
+        for piece in pieces:
+            item = dict(chunk)
+            item["content"] = piece
+            item["section_path"] = item.get("section_path") or item.get("title", "")
+            result.append(item)
+    return result
+# ==================== AI修改 结束 ====================
 
 
 def vectorize_chunks(chunks):
@@ -50,10 +79,15 @@ def vectorize_chunks(chunks):
     线上NodeBGEEmbedding入库时用的是 f"{item_name} {content}",
     检索时问题向量化的对象自然携带了主体名语义,两边格式一致相似度才有意义。
     """
+    chunks = split_education_chunks(chunks)
     # range(0, len, BATCH_SIZE)生成每批的起点,经典分批套路
     for i in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[i:i + BATCH_SIZE]  # 切片取一批(最后一批可能不足3条,切片自动处理)
-        texts = [f"{c.get('item_name')} {c.get('content')}" for c in batch]
+        texts = [
+            f"{c.get('section_path') or c.get('title', '')} "
+            f"{c.get('item_name', '')} {c.get('content', '')}"
+            for c in batch
+        ]
         vectors = vectorize_texts(texts)  # 一次调用同时返回dense和sparse两个列表
         # 向量按顺序回填到每个chunk上(enumerate对位回填)
         for idx, chunk in enumerate(batch):
@@ -178,13 +212,39 @@ def import_chunks(chunks, file_title, source_path=None, source_id=None):
     """
     教育 chunk 直接调用统一知识存储模块。
 
-    教育来源和普通文档使用同一张 knowledge_chunks 表，课程/题目差异
+    教育来源和普通文档使用同一张 knowledge_chunks_graph 表，课程/题目差异
     只保留在 content_type 和 source_type 元数据中。
     """
     # ==================== AI修改 开始 ====================
     source_path = str(source_path or file_title)
     source_id = str(source_id or file_title)
     document_id = build_document_id("education", source_id, source_path)
+    content_type = chunks[0].get("content_type") or "doc"
+    metadata_rows = []
+    for index, chunk in enumerate(chunks):
+        section_path = chunk.get("section_path") or chunk.get("title") or file_title
+        chunk["document_id"] = document_id
+        chunk["chunk_index"] = index
+        chunk["section_path"] = section_path
+        chunk["chunk_id"] = chunk.get("chunk_id") or build_chunk_id(
+            document_id, index, section_path, chunk.get("content", "")
+        )
+        metadata_rows.append({
+            "document_id": document_id,
+            "chunk_id": chunk["chunk_id"],
+            "chunk_index": index,
+            "content_type": content_type,
+            "domain_metadata": {
+                key: chunk.get(key, "")
+                for key in (
+                    "course_name", "course_code", "chapter_name", "course_category",
+                    "target_users", "learning_goals", "project_name",
+                    "question_bank_name", "question_bank_code", "question_code",
+                    "question_type", "code", "q_type",
+                )
+                if chunk.get(key, "")
+            },
+        })
     KnowledgeChunkStore(
         collection_name=MilvusConfig.milvus_chunks_collection,
     ).replace_document(
@@ -195,10 +255,18 @@ def import_chunks(chunks, file_title, source_path=None, source_id=None):
             "source_type": "education",
             "source_id": source_id,
             "source_path": source_path,
-            "source_name": file_title,
-            "file_title": file_title,
+            "content_type": content_type,
         },
     )
+    replace_education_metadata(document_id, metadata_rows)
+    NodeGraphBuild().process({
+        "document_id": document_id,
+        "source_type": "education",
+        "source_id": source_id,
+        "source_path": source_path,
+        "content_type": content_type,
+        "chunks": chunks,
+    })
     # ==================== AI修改 结束 ====================
     logger.info(f"{file_title}导入完成,共{len(chunks)}条chunk")
 

@@ -376,6 +376,42 @@
         .session-item.active .session-item-menu { opacity: 1; }
 
         /* ==================== AI修改 开始 ====================
+           会话操作使用独立图标，删除不再隐藏在重命名弹窗中。
+           ==================== AI修改 结束 ==================== */
+        .session-item-actions {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            opacity: 0;
+            transition: opacity .18s ease;
+        }
+
+        .session-item:hover .session-item-actions,
+        .session-item.active .session-item-actions { opacity: 1; }
+
+        .session-item-menu,
+        .session-item-delete {
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--faint);
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 24px;
+        }
+
+        .session-item-menu:hover,
+        .session-item-delete:hover {
+            background: var(--bg-hover);
+            color: var(--text);
+        }
+
+        .session-item-delete:hover { color: var(--err); }
+
+        /* ==================== AI修改 开始 ====================
            教育导入工作台：青绿色作为“已落库/教育数据”专属强调色，
            与普通文档上传的蓝色进度区分开，用户一眼知道自己导入的是哪类资料。
            ==================== AI修改 结束 ==================== */
@@ -927,6 +963,25 @@
 
         .answer-text .md-h:first-child { margin-top: 0; }
 
+        .answer-text h1,
+        .answer-text h2,
+        .answer-text h3,
+        .answer-text h4,
+        .answer-text h5,
+        .answer-text h6 {
+            margin: 15px 0 7px;
+            color: var(--text);
+            line-height: 1.35;
+            font-weight: 680;
+        }
+
+        .answer-text h1 { font-size: 18px; }
+        .answer-text h2 { font-size: 17px; }
+        .answer-text h3 { font-size: 15.5px; }
+        .answer-text h4,
+        .answer-text h5,
+        .answer-text h6 { font-size: 14.5px; }
+
         .answer-text .md-li {
             display: flex;
             gap: 9px;
@@ -958,7 +1013,17 @@
             font-size: .86em;
         }
 
-        .answer-text .md-pre {
+        .answer-text :not(pre) > code {
+            background: var(--bg-soft);
+            border: 1px solid var(--border);
+            padding: 1px 6px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: .86em;
+        }
+
+        .answer-text .md-pre,
+        .answer-text pre {
             background: var(--bg-soft);
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -968,7 +1033,8 @@
             white-space: pre;
         }
 
-        .answer-text .md-pre code {
+        .answer-text .md-pre code,
+        .answer-text pre code {
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             font-size: 13px;
             line-height: 1.6;
@@ -982,6 +1048,136 @@
 
         .answer-text .md-link:hover {
             border-bottom-color: var(--accent);
+        }
+
+        .answer-text p {
+            margin: 0 0 11px;
+        }
+
+        .answer-text p:last-child {
+            margin-bottom: 0;
+        }
+
+        .answer-text blockquote {
+            margin: 12px 0;
+            padding: 11px 14px;
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--text);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--bg-soft) 86%, var(--bg));
+            color: var(--muted);
+        }
+
+        .answer-text hr {
+            margin: 16px 0;
+            border: 0;
+            border-top: 1px solid var(--border-strong);
+        }
+
+        .answer-text ul,
+        .answer-text ol {
+            margin: 7px 0 12px;
+            padding-left: 24px;
+        }
+
+        .answer-text li + li {
+            margin-top: 4px;
+        }
+
+        /* Markdown 表格作为独立内容块，窄屏只让表格横向滚动，不挤坏聊天列。 */
+        .answer-text .md-table-wrap {
+            max-width: 100%;
+            margin: 12px 0 15px;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--bg-soft) 74%, transparent);
+            box-shadow: var(--shadow-sm);
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .answer-text .md-table {
+            width: 100%;
+            min-width: 520px;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .answer-text .md-table th,
+        .answer-text .md-table td {
+            padding: 9px 12px;
+            text-align: left;
+            vertical-align: top;
+            border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .answer-text .md-table th {
+            color: var(--text);
+            font-weight: 650;
+            background: var(--accent-soft);
+            white-space: nowrap;
+        }
+
+        .answer-text .md-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .answer-text .md-table th:last-child,
+        .answer-text .md-table td:last-child {
+            border-right: 0;
+        }
+
+        /* 公式块有自己的阅读边界；KaTeX 过宽时只在公式块内滚动。 */
+        .answer-text .md-math-block,
+        .answer-text .katex-display {
+            max-width: 100%;
+            margin: 14px 0;
+            padding: 13px 15px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            border: 1px solid var(--accent-border);
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--accent-soft) 72%, var(--bg-soft));
+            color: var(--text);
+            text-align: center;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .answer-text .md-math-block code,
+        .answer-text .md-math-inline {
+            font-family: "STIX Two Math", "Cambria Math", ui-monospace, monospace;
+            color: var(--text);
+        }
+
+        .answer-text .md-math-block code {
+            white-space: pre;
+            font-size: 13px;
+        }
+
+        .answer-text .md-math-inline {
+            padding: 1px 4px;
+            border-radius: 5px;
+            background: var(--accent-soft);
+        }
+
+        .answer-text .katex-display {
+            /* KaTeX 自带 display margin，这里只保留我们的卡片边界。 */
+            text-align: center;
+        }
+
+        .answer-text .katex {
+            color: var(--text);
+            font-size: 1.06em;
+        }
+
+        .answer-text .md-code-lang {
+            display: block;
+            margin: -3px 0 5px;
+            color: var(--muted);
+            font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         }
 
         /* ==================== AI修改: 思考中状态(流光文字) ====================
@@ -1171,6 +1367,12 @@
         .proc-toggle.fail .live {
             background: none;
             color: var(--err);
+            animation: none;
+        }
+
+        .proc-toggle.stop .live {
+            background: none;
+            color: var(--muted);
             animation: none;
         }
 
@@ -1537,6 +1739,30 @@
             margin-top: 6px;
         }
 
+        .obsidian-upload-area {
+            margin: 14px 0 10px;
+            padding: 30px 24px;
+        }
+
+        .folder-pick-btn {
+            margin-top: 10px;
+            padding: 7px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface);
+            color: var(--text);
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .folder-pick-btn:hover {
+            border-color: var(--border-strong);
+            background: var(--bg);
+        }
+
+        .obsidian-import-actions { margin-top: 0; }
+
         .file-input { display: none; }
 
         /* ==================== AI修改 开始 ====================
@@ -1546,6 +1772,7 @@
             display: flex;
             gap: 8px;
             margin-top: 10px;
+            flex-wrap: wrap;
         }
 
         .local-dir-input {
@@ -1584,6 +1811,59 @@
 
         .local-import-btn:hover { opacity: .88; transform: translateY(-1px); }
         .local-import-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+        .source-delete-btn {
+            flex-shrink: 0;
+            padding: 9px 14px;
+            border: 1px solid rgba(220, 38, 38, .28);
+            border-radius: 10px;
+            background: rgba(220, 38, 38, .07);
+            color: var(--err);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background-color .18s ease, border-color .18s ease;
+        }
+
+        .source-delete-btn:hover {
+            background: rgba(220, 38, 38, .13);
+            border-color: rgba(220, 38, 38, .45);
+        }
+
+        .source-delete-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+        .file-delete-btn {
+            margin-left: auto;
+            padding: 4px 9px;
+            font-size: 11px;
+            border-radius: 7px;
+        }
+
+        .obsidian-import-card {
+            margin: 18px 0 22px;
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--bg-soft);
+        }
+
+        .obsidian-import-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 12px;
+        }
+
+        .obsidian-import-title { font-weight: 700; color: var(--text); }
+        .obsidian-import-sub { margin-top: 4px; color: var(--faint); font-size: 12px; }
+
+        @media (max-width: 720px) {
+            .obsidian-import-head { flex-direction: column; }
+            .local-dir-input { min-width: 100%; }
+            .local-import-row > button { flex: 1; }
+        }
 
         .file-list {
             display: flex;
@@ -1842,6 +2122,8 @@
         @media (max-width: 640px) {
             .session-panel { display: none; }
             .edu-file-grid, .edu-stats { grid-template-columns: 1fr; }
+            .edu-card-head { flex-direction: column; gap: 8px; }
+            .edu-badge { align-self: flex-start; }
             .import-hero { display: block; }
             .edu-actions { align-items: flex-start; flex-direction: column; }
             .thread, .import-body .thread { padding: 18px 14px; }
@@ -2026,6 +2308,7 @@
                         <input type="file" id="eduQuestionInput" class="file-input" accept=".md">
                         <div class="edu-actions">
                             <button class="edu-submit" id="eduImportBtn" type="button" disabled>开始导入教育数据</button>
+                            <button class="source-delete-btn" id="eduDeleteBtn" type="button">删除本次教育文件</button>
                             <span class="edu-status" id="eduImportStatus">可选择课程资料、题目资料，或两份一起导入</span>
                         </div>
                         <div class="edu-stats">
@@ -2050,6 +2333,35 @@
                         </div>
                         <div class="catalog-grid" id="educationCatalog">
                             <div class="catalog-empty">导入教育资料后，这里会显示课程和题目目录</div>
+                        </div>
+                    </section>
+                    <section class="obsidian-import-card">
+                        <div class="obsidian-import-head">
+                            <div>
+                                <div class="obsidian-import-title">Obsidian 知识库</div>
+                                <div class="obsidian-import-sub">Markdown / 图片 · 支持批量拖拽 · 选择文件夹可保留 Vault 目录结构</div>
+                            </div>
+                            <span class="edu-badge">OBSIDIAN / MARKDOWN</span>
+                        </div>
+                        <div class="upload-area obsidian-upload-area" id="obsidianDropZone">
+                            <div class="upload-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 16V4m0 0L7 9m5-5l5 5"/>
+                                    <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+                                </svg>
+                            </div>
+                            <div class="upload-text" id="obsidianUploadText">点击或拖拽 Vault 文件到此处</div>
+                            <div class="upload-sub" id="obsidianUploadSub">支持多选 Markdown 和图片 · 也可以直接拖入整个 Vault 文件夹</div>
+                            <input type="file" id="obsidianFileInput" class="file-input"
+                                   accept=".md,.png,.jpg,.jpeg,.gif,.bmp,.webp" multiple>
+                            <input type="file" id="obsidianFolderInput" class="file-input"
+                                   webkitdirectory directory multiple>
+                            <button id="obsidianFolderBtn" class="folder-pick-btn" type="button">选择 Vault 文件夹</button>
+                        </div>
+                        <div class="local-import-row obsidian-import-actions">
+                            <span id="obsidianVaultName" class="local-dir-input">未选择文件</span>
+                            <button id="obsidianImportBtn" class="local-import-btn" type="button" disabled>上传导入</button>
+                            <button id="obsidianDeleteBtn" class="source-delete-btn" type="button">删除当前来源</button>
                         </div>
                     </section>
                     <div class="import-section-label">普通文档导入</div>
@@ -2080,6 +2392,7 @@
                         <input type="text" id="localDirInput" class="local-dir-input"
                                placeholder="本地文件夹一键导入：粘贴路径（md 的图片自动配对，无需手动选）">
                         <button id="localImportBtn" class="local-import-btn">扫描导入</button>
+                        <button id="documentDeleteBtn" class="source-delete-btn" type="button">删除当前目录</button>
                     </div>
                     <div id="fileList" class="file-list"></div>
                 </div>
@@ -2088,6 +2401,30 @@
     </div>
 </div>
 
+<!-- 异步加载增强资源，避免 CDN 不可用时阻塞主页面和本地 fallback。 -->
+<script>
+    window.__answerRendererEnhancerPromise = (async () => {
+        const loadScript = (src) => new Promise(resolve => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = resolve;
+            document.head.appendChild(script);
+        });
+        const loadStyle = (href) => {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href;
+            document.head.appendChild(link);
+        };
+        loadStyle('https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css');
+        await loadScript('https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.umd.min.js');
+        await loadScript('https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js');
+        await loadScript('https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js');
+        await loadScript('https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js');
+        window.dispatchEvent(new Event('answer-renderer-ready'));
+    })();
+</script>
 <script>
     /* ================= 通用 ================= */
     /* AI修改: 前后端已合并为单一服务(8000端口)。页面若由后端托管则用同源相对路径,
@@ -2104,6 +2441,64 @@
             .replaceAll("'", "&#039;");
     }
 
+    async function deleteKnowledgeSource(sourceType, sourceId, label) {
+        const normalizedId = String(sourceId || '').trim();
+        if (!normalizedId) throw new Error(`${label}缺少来源身份，已拒绝删除`);
+        const scope = `来源“${normalizedId}”`;
+        if (!confirm(`确定删除${scope}的全部知识切片吗？此操作无法恢复。`)) return;
+
+        const query = `?source_id=${encodeURIComponent(normalizedId)}`;
+        const response = await fetch(
+            `${API_BASE}/knowledge/sources/${encodeURIComponent(sourceType)}${query}`,
+            { method: 'DELETE' }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || '删除失败');
+        alert(`已删除 ${result.delete_count ?? 0} 个知识切片`);
+        return result;
+    }
+
+    async function deleteKnowledgeDocument(documentId, label, confirmBefore = true) {
+        const normalizedId = String(documentId || '').trim();
+        if (!normalizedId) throw new Error(`${label}缺少 document_id，已拒绝删除`);
+        if (confirmBefore && !confirm(`确定删除文件“${label}”的全部知识切片吗？此操作无法恢复。`)) {
+            return null;
+        }
+        const response = await fetch(
+            `${API_BASE}/knowledge/documents/${encodeURIComponent(normalizedId)}`,
+            { method: 'DELETE' }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || '删除文件失败');
+        alert(`已删除 ${result.delete_count ?? 0} 个知识切片`);
+        return result;
+    }
+
+    function attachDocumentDelete(itemEl, documentId, label) {
+        if (!documentId) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'source-delete-btn file-delete-btn';
+        button.textContent = '删除';
+        button.title = '删除这个文件';
+        button.addEventListener('click', async () => {
+            button.disabled = true;
+            try {
+                const result = await deleteKnowledgeDocument(documentId, label);
+                if (result) {
+                    itemEl.style.opacity = '0.55';
+                    button.textContent = '已删除';
+                } else {
+                    button.disabled = false;
+                }
+            } catch (error) {
+                button.disabled = false;
+                alert('文件删除失败: ' + (error.message || error));
+            }
+        });
+        itemEl.querySelector('.file-header').appendChild(button);
+    }
+
     /* ================= AI修改: 明暗主题切换 ================= */
     (function () {
         const saved = localStorage.getItem('kb_theme');
@@ -2117,37 +2512,204 @@
         });
     })();
 
-    /* ================= AI修改: 轻量Markdown渲染 =================
-       先整体HTML转义(防XSS),再按常见语法转换:
-       ```代码块``` → <pre>, `行内代码`, **加粗**, *斜体*, # 标题,
-       -/* 无序列表, 1. 有序列表, [文字](链接) → <a>
-       代码块用占位符保护,避免内部内容被其他规则二次处理 */
-    function renderMarkdown(src) {
-        let s = escapeHtml(String(src || ''));
-        const preBlocks = [];
-        // 代码块: 流式输出中可能出现未闭合的```,用 (```|$) 兜底,保证半截代码块也能实时渲染
-        s = s.replace(/```[^\n]*\n?([\s\S]*?)(?:```|$)/g, (m, code) => {
-            preBlocks.push(code);
-            return "\x00PRE" + (preBlocks.length - 1) + "\x00";
-        });
-        // 答案正文只保留一个段落间距,避免模型连续输出大量空行把聊天区拉得过长。
-        // 代码块已被占位符保护,因此这里不会改变代码内部的换行。
-        s = s.replace(/[ \t]+\n/g, '\n');
-        s = s.replace(/\n{3,}/g, '\n\n');
+    /* ================= AI修改: Markdown + 数学公式渲染 =================
+       有 marked/KaTeX/DOMPurify 时使用成熟解析器；CDN 不可用时，
+       renderMarkdownFallback 仍能安全渲染常见 Markdown、表格和公式框。
+       模型输出永远先经过转义或 DOMPurify，不把原始答案直接当 HTML 执行。 */
+    function splitMarkdownTableRow(row) {
+        const value = String(row || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+        return value.split('|').map(cell => cell.trim());
+    }
+
+    function isMarkdownTableSeparator(row) {
+        const cells = splitMarkdownTableRow(row);
+        return cells.length > 0 && cells.every(cell => /^:?-{3,}:?$/.test(cell));
+    }
+
+    function renderFallbackInline(value) {
+        let s = escapeHtml(String(value || ''));
         s = s.replace(/`([^`\n]+)`/g, '<code class="md-code">$1</code>');
         s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
         s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
+        s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+            (match, label, url) => `<a class="md-link" href="${normalizeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+        return s;
+    }
+
+    function renderFallbackTable(rows) {
+        const header = rows[0] || [];
+        const body = rows.slice(1);
+        const headerHtml = header.map(cell => `<th>${renderFallbackInline(cell)}</th>`).join('');
+        const bodyHtml = body.map(row => {
+            const cells = header.map((_, index) => row[index] || '');
+            return `<tr>${cells.map(cell => `<td>${renderFallbackInline(cell)}</td>`).join('')}</tr>`;
+        }).join('');
+        return `<div class="md-table-wrap"><table class="md-table"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+    }
+
+    // ==================== AI修改 开始 ====================
+    // 模型有时把块级公式写成单独一行的 [ ... ]，先转为 KaTeX 能识别的 $$ ... $$。
+    // 代码块先占位，避免命令示例或数组字面量被误判为公式。
+    function normalizeMathDelimiters(src) {
+        const codeBlocks = [];
+        let raw = String(src || '').replace(/\r\n?/g, '\n');
+        raw = raw.replace(/```[\s\S]*?(?:```|$)/g, code => {
+            codeBlocks.push(code);
+            return `\x00CODE${codeBlocks.length - 1}\x00`;
+        });
+        const looksLikeMath = body =>
+            /\\[a-zA-Z]+|[A-Za-z0-9)]\s*[_^]\s*[A-Za-z0-9({]|[=]|\\/.test(body)
+            && !/https?:\/\//i.test(body);
+        raw = raw.replace(
+            /(^|\n)[ \t]*\[[ \t]*\n([\s\S]*?)\n[ \t]*\](?=[ \t]*(?:\n|$))/g,
+            (match, prefix, body) => looksLikeMath(body)
+                ? `${prefix}$$\n${body.trim()}\n$$`
+                : match
+        );
+        raw = raw.replace(
+            /(^|\n)[ \t]*\[([^\n\]]{3,})\](?=[ \t]*(?:\n|$))/g,
+            (match, prefix, body) => looksLikeMath(body)
+                ? `${prefix}$$${body.trim()}$$`
+                : match
+        );
+        return raw.replace(/\x00CODE(\d+)\x00/g, (match, index) => codeBlocks[Number(index)]);
+    }
+    // ==================== AI修改 结束 ====================
+
+    function renderMarkdownFallback(src) {
+        let raw = normalizeMathDelimiters(src);
+        const preBlocks = [];
+        const tableBlocks = [];
+        const mathBlocks = [];
+
+        // 先保护代码，避免代码里的 |、$ 和反引号被正文规则误解析。
+        raw = raw.replace(/```[^\n]*\n?([\s\S]*?)(?:```|$)/g, (match, code) => {
+            preBlocks.push(code);
+            return `\x00PRE${preBlocks.length - 1}\x00`;
+        });
+
+        const lines = raw.split('\n');
+        const outputLines = [];
+        for (let index = 0; index < lines.length; index += 1) {
+            const current = lines[index];
+            if (index + 1 < lines.length && current.includes('|') && isMarkdownTableSeparator(lines[index + 1])) {
+                const rows = [splitMarkdownTableRow(current)];
+                index += 2;
+                while (index < lines.length && lines[index].trim() && lines[index].includes('|')) {
+                    rows.push(splitMarkdownTableRow(lines[index]));
+                    index += 1;
+                }
+                tableBlocks.push(renderFallbackTable(rows));
+                outputLines.push(`\x00TABLE${tableBlocks.length - 1}\x00`);
+                index -= 1;
+                continue;
+            }
+
+            const trimmed = current.trim();
+            const isDollarBlock = trimmed === '$$' || trimmed.startsWith('$$');
+            const isBracketBlock = trimmed.startsWith('\\[');
+            if (isDollarBlock || isBracketBlock) {
+                const close = isDollarBlock ? '$$' : '\\]';
+                const formulaLines = [current.replace(/^\s*(?:\$\$|\\\[)/, '')];
+                if (!trimmed.endsWith(close) || trimmed.length <= close.length * 2) {
+                    while (index + 1 < lines.length) {
+                        index += 1;
+                        const next = lines[index];
+                        if (next.trim().endsWith(close)) {
+                            formulaLines.push(next.replace(new RegExp(`${close}\\s*$`), ''));
+                            break;
+                        }
+                        formulaLines.push(next);
+                    }
+                } else {
+                    formulaLines[0] = formulaLines[0].replace(new RegExp(`${close}\\s*$`), '');
+                }
+                mathBlocks.push(`<div class="md-math-block"><code>${escapeHtml(formulaLines.join('\n').trim())}</code></div>`);
+                outputLines.push(`\x00MATH${mathBlocks.length - 1}\x00`);
+                continue;
+            }
+            outputLines.push(current);
+        }
+
+        let s = escapeHtml(outputLines.join('\n'));
+        s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+        s = s.replace(/\x00PRE(\d+)\x00/g, (match, index) =>
+            `<pre class="md-pre"><code>${escapeHtml(preBlocks[Number(index)])}</code></pre>`);
+        s = s.replace(/\x00TABLE(\d+)\x00/g, (match, index) => tableBlocks[Number(index)]);
+        s = s.replace(/\x00MATH(\d+)\x00/g, (match, index) => mathBlocks[Number(index)]);
         s = s.replace(/^#{1,6}\s+(.+)$/gm, '<div class="md-h">$1</div>');
         s = s.replace(/^[-•]\s+(.+)$/gm, '<div class="md-li"><span class="md-dot"></span><span>$1</span></div>');
         s = s.replace(/^(\d+)[.、]\s+(.+)$/gm, '<div class="md-li"><span class="md-marker">$1.</span><span>$2</span></div>');
-        // 链接: 只允许 http/https 协议,防止 javascript: 注入
-        s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a class="md-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-        s = s.replace(/\x00PRE(\d+)\x00/g, (m, i) => '<pre class="md-pre"><code>' + preBlocks[Number(i)] + '</code></pre>');
-        // 两个换行只生成一个视觉断行,让段落之间保留呼吸感但不再松散。
-        s = s.replace(/\n\n/g, '<br>');
-        s = s.replace(/\n/g, '<br>');
-        return s;
+        s = s.replace(/(\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$)/g,
+            '<div class="md-math-block"><code>$1</code></div>');
+        s = s.replace(/(\\\((?:[^\\]|\\(?!\)))*?\\\)|\$[^$\n]+\$)/g,
+            '<span class="md-math-inline">$1</span>');
+        s = s.replace(/`([^`\n]+)`/g, '<code class="md-code">$1</code>');
+        s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<em>$2</em>');
+        s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+            (match, label, url) => `<a class="md-link" href="${normalizeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+        return s.replace(/\n\n/g, '<br>').replace(/\n/g, '<br>');
     }
+
+    function renderMarkdown(src) {
+        const raw = normalizeMathDelimiters(src);
+        const canUseEnhancedRenderer = window.marked && typeof window.marked.parse === 'function'
+            && window.DOMPurify && window.renderMathInElement && window.katex;
+        if (!canUseEnhancedRenderer) return renderMarkdownFallback(raw);
+
+        try {
+            const html = window.marked.parse(raw, {gfm: true, breaks: true});
+            const clean = window.DOMPurify.sanitize(html, {
+                ADD_ATTR: ['target', 'rel'],
+                FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed']
+            });
+            const holder = document.createElement('div');
+            holder.innerHTML = clean;
+            holder.querySelectorAll('table').forEach(table => {
+                table.classList.add('md-table');
+                const wrapper = document.createElement('div');
+                wrapper.className = 'md-table-wrap';
+                table.parentNode.insertBefore(wrapper, table);
+                wrapper.appendChild(table);
+            });
+            // ==================== AI修改 开始 ====================
+            // marked 生成的图片链接也经过同一边界修复，避免坏 URL 继续出现在正文里。
+            // ==================== AI修改 结束 ====================
+            holder.querySelectorAll('a[href]').forEach(link => {
+                const normalized = normalizeUrl(link.getAttribute('href') || '');
+                if (isImageUrl(normalized)) {
+                    link.setAttribute('href', normalized);
+                    link.textContent = normalizeUrl(link.textContent || normalized);
+                }
+            });
+            window.renderMathInElement(holder, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '\\[', right: '\\]', display: true},
+                    {left: '\\(', right: '\\)', display: false},
+                    {left: '$', right: '$', display: false}
+                ],
+                throwOnError: false,
+                strict: false,
+                ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+            });
+            return holder.innerHTML;
+        } catch (error) {
+            console.warn('[Markdown渲染降级]', error);
+            return renderMarkdownFallback(raw);
+        }
+    }
+
+    function rerenderStoredAnswers() {
+        document.querySelectorAll('.answer-text[data-raw-answer]').forEach(textEl => {
+            textEl.innerHTML = renderMarkdown(textEl.dataset.rawAnswer || '');
+        });
+    }
+
+    // CDN 增强层晚到时，把已经显示过的 fallback 答案升级为 KaTeX/marked 版本。
+    window.addEventListener('answer-renderer-ready', rerenderStoredAnswers);
+    window.__answerRendererEnhancerPromise?.then(rerenderStoredAnswers);
 
     /* ================= 视图切换 ================= */
     const tabChat = document.getElementById('tabChat');
@@ -2188,6 +2750,75 @@
     const sendBtn = document.getElementById('send');
     const btnClear = document.getElementById('btnClear');
 
+    // ==================== AI修改 开始 ====================
+    // 当前查询只保留一个活动任务，停止时同时关闭浏览器流和后端协作取消标记。
+    let activeTaskId = '';
+    let activeEventSource = null;
+    let activeBotMsgEl = null;
+    let queryRunning = false;
+    let stopRequested = false;
+
+    const SEND_ICON = sendBtn.innerHTML;
+    const STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>';
+
+    function setQueryButton(running) {
+        queryRunning = running;
+        sendBtn.disabled = false;
+        sendBtn.classList.toggle('stop', running);
+        sendBtn.title = running ? '停止本次查询' : '发送 (Enter)';
+        sendBtn.innerHTML = running ? STOP_ICON : SEND_ICON;
+    }
+
+    function markQueryStopped(keepStopRequested = false) {
+        const botMsgEl = activeBotMsgEl;
+        if (botMsgEl) {
+            const typing = botMsgEl.querySelector('.typing');
+            if (typing) typing.remove();
+            const progress = botMsgEl.querySelector('.proc-wrap');
+            if (progress) {
+                const elapsed = stopProcElapsedTimer(progress);
+                progress.classList.remove('open');
+                const button = progress.querySelector('.proc-toggle');
+                if (button) {
+                    button.className = 'proc-toggle stop';
+                    button.querySelector('.live').textContent = '已停止查询';
+                    button.querySelector('.proc-elapsed').textContent = formatDuration(elapsed || 0.1);
+                    button.querySelector('.proc-subtitle').textContent = '本次检索已中断';
+                }
+            }
+            const answerEl = botMsgEl.querySelector('.answer');
+            if (answerEl) {
+                const previous = answerEl.querySelector('.answer-text')?.dataset.rawAnswer || '';
+                renderAnswerWithImages(answerEl, previous + '\n\n本次查询已停止。', []);
+            }
+        }
+        if (activeEventSource) activeEventSource.close();
+        activeEventSource = null;
+        activeTaskId = '';
+        activeBotMsgEl = null;
+        stopRequested = keepStopRequested;
+        setQueryButton(false);
+        loadSessions();
+    }
+
+    async function stopActiveQuery() {
+        if (!queryRunning) return;
+        stopRequested = true;
+        const taskId = activeTaskId;
+        // 先断开前端流，避免取消请求返回期间仍把尾部事件渲染成完成。
+        if (activeEventSource) activeEventSource.close();
+        activeEventSource = null;
+        if (taskId) {
+            try {
+                await fetch(`${API_BASE}/query/${encodeURIComponent(taskId)}/cancel`, {method: 'POST'});
+            } catch (_) {
+                // 本地先停止显示，后端标记失败时也不会继续接收答案流。
+            }
+        }
+        markQueryStopped(!taskId);
+    }
+    // ==================== AI修改 结束 ====================
+
     // AI修改: bot头像的SVG(星形),复用在骨架和历史消息里
     const BOT_AVATAR_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.6L12 17l-1.9-5.4L4.5 10l5.6-1.6L12 3z"/></svg>';
 
@@ -2216,7 +2847,10 @@
             row.innerHTML = '<span class="session-item-icon">✦</span>' +
                 '<span class="session-item-title" title="' + escapeHtml(item.title || '新会话') + '">' +
                 escapeHtml(item.title || '新会话') + '</span>' +
-                '<button class="session-item-menu" type="button" title="重命名">···</button>';
+                '<span class="session-item-actions">' +
+                '<button class="session-item-menu" type="button" title="重命名">···</button>' +
+                '<button class="session-item-delete" type="button" title="删除会话" aria-label="删除会话">×</button>' +
+                '</span>';
             sessionListEl.appendChild(row);
         }
     }
@@ -2286,24 +2920,48 @@
     }
     // ==================== AI修改 结束 ====================
 
+    // ==================== AI修改 开始 ====================
+    // 发送后先在本地把当前会话置顶，服务端目录随后用同一 session_id 刷新时间。
+    function markSessionActivity(text) {
+        let current = sessionItems.find(item => item.session_id === sessionId);
+        if (!current) {
+            current = {session_id: sessionId, title: text || '新会话', updated_ts: 0};
+            sessionItems.unshift(current);
+        }
+        if (!current.title || current.title === '新会话' || current.title === '当前会话') {
+            current.title = text || '新会话';
+        }
+        current.updated_ts = Date.now() / 1000;
+        sessionItems.sort((a, b) => (b.updated_ts || 0) - (a.updated_ts || 0));
+        renderSessionList(sessionItems);
+    }
+    // ==================== AI修改 结束 ====================
+
     sessionListEl.addEventListener('click', async (event) => {
         const row = event.target.closest('.session-item');
         if (!row) return;
         const id = row.dataset.sessionId;
-        if (event.target.closest('.session-item-menu')) {
-            const current = sessionItems.find(item => item.session_id === id);
-            const title = prompt('输入新名称；如需删除请输入“删除”', current?.title || '新会话');
-            if (!title || !title.trim()) return;
-            if (title.trim() === '删除') {
-                if (!confirm('确定删除这个会话及其历史记录吗？')) return;
-                await fetch(API_BASE + '/sessions/' + encodeURIComponent(id), {method: 'DELETE'});
+        if (event.target.closest('.session-item-delete')) {
+            event.stopPropagation();
+            if (!confirm('确定删除这个会话及其历史记录吗？')) return;
+            try {
+                const res = await fetch(API_BASE + '/sessions/' + encodeURIComponent(id), {method: 'DELETE'});
+                if (!res.ok) throw new Error('删除失败');
                 if (id === sessionId) {
                     await createNewSession();
                 } else {
                     await loadSessions();
                 }
-                return;
+            } catch (error) {
+                alert('会话删除失败：' + (error.message || error));
             }
+            return;
+        }
+        if (event.target.closest('.session-item-menu')) {
+            event.stopPropagation();
+            const current = sessionItems.find(item => item.session_id === id);
+            const title = prompt('输入新名称', current?.title || '新会话');
+            if (!title || !title.trim()) return;
             await fetch(API_BASE + '/sessions/' + encodeURIComponent(id), {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
@@ -2375,8 +3033,14 @@
     }
 
     function normalizeUrl(rawUrl) {
-        const s = String(rawUrl || '').trim();
+        let s = String(rawUrl || '').trim();
         if (!s) return '';
+        // ==================== AI修改 开始 ====================
+        // 图片地址后若粘入下一句中文，按图片后缀截断，避免渲染器生成损坏 href。
+        // 查询串/片段只接受 URL 安全字符，中文正文会自然停在图片后缀处。
+        const imagePrefix = s.match(/^(.*?\.(?:png|jpe?g|gif|webp|bmp|svg)(?:[?#][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]*)?)/i);
+        if (imagePrefix) s = imagePrefix[1];
+        // ==================== AI修改 结束 ====================
         return s.replace(/\s/g, '%20');
     }
 
@@ -2460,6 +3124,7 @@
 
         const textEl = document.createElement('div');
         textEl.className = 'answer-text';
+        textEl.dataset.rawAnswer = text || '';
         // AI修改: 正文走Markdown渲染(内部已做HTML转义,安全)
         if ((text || '').trim().length > 0) {
             textEl.innerHTML = renderMarkdown(text);
@@ -2566,6 +3231,10 @@
         'node_item_name_confirm': '确认问题产品',
         'node_search_embedding': '向量检索知识库',
         'node_search_embedding_hyde': '假设文档检索',
+        // ==================== AI修改 开始 ====================
+        // 查询链中的 Graph Search 也使用中文状态名，避免出现英文兜底。
+        'node_graph_search': '图谱检索',
+        // ==================== AI修改 结束 ====================
         'node_rrf': '融合多路检索结果',
         'node_rerank': '重排筛选候选内容',
         'node_web_search_mcp': '联网搜索',
@@ -2706,13 +3375,21 @@
     }
 
     async function onSend() {
+        if (queryRunning) {
+            await stopActiveQuery();
+            return;
+        }
         const text = (inputEl.value || '').trim();
         if (!text) return;
         inputEl.value = '';
         inputEl.style.height = 'auto';
         addUserMsg(text);
         const botMsgEl = addBotMsgSkeleton();
-        sendBtn.disabled = true;
+        activeBotMsgEl = botMsgEl;
+        stopRequested = false;
+        setQueryButton(true);
+        const titleSync = ensureFirstSessionTitle(text);
+        markSessionActivity(text);
 
         try {
             const data = await submitQuery(text);
@@ -2720,16 +3397,27 @@
             // 查询成功后同步首条问题标题；不再只刷新列表而保持“新会话”。
             await ensureFirstSessionTitle(text);
             // ==================== AI修改 结束 ====================
+            await titleSync;
             const {task_id} = data;
+            if (stopRequested) {
+                await fetch(`${API_BASE}/query/${encodeURIComponent(task_id)}/cancel`, {method: 'POST'}).catch(() => {});
+                return;
+            }
             const contentEl = botMsgEl.querySelector('.content');
             const answerEl = contentEl.querySelector('.answer');
 
             const es = new EventSource(`${API_BASE}/stream/${task_id}`);
+            activeTaskId = task_id;
+            activeEventSource = es;
             let rawAnswerText = '';
 
             es.addEventListener('progress', (e) => {
                 try {
                     const d = JSON.parse(e.data || '{}');
+                    if (d && d.status === 'cancelled') {
+                        markQueryStopped();
+                        return;
+                    }
                     // 只有检索链路才显示状态面板,闲聊全程只有"..."
                     if (isPipelineProgress(d.done_list, d.running_list)) {
                         renderProgress(botMsgEl, d.done_list, d.running_list, d.status, d.durations);
@@ -2737,7 +3425,6 @@
                     if (d && d.status === 'completed') {
                         const typing = botMsgEl.querySelector('.typing');
                         if (typing) typing.remove();
-                        sendBtn.disabled = false;
                     }
                 } catch (_) {
                 }
@@ -2793,6 +3480,14 @@
             });
 
             es.addEventListener('final', (e) => {
+                try {
+                    const finalData = JSON.parse(e.data || '{}');
+                    if (finalData.cancelled) {
+                        markQueryStopped();
+                        return;
+                    }
+                } catch (_) {
+                }
                 const typing = botMsgEl.querySelector('.typing');
                 if (typing) typing.remove();
 
@@ -2825,10 +3520,15 @@
                 } catch (_) {
                 }
                 es.close();
-                sendBtn.disabled = false;
+                activeEventSource = null;
+                activeTaskId = '';
+                activeBotMsgEl = null;
+                setQueryButton(false);
+                loadSessions();
             });
 
             es.addEventListener('error', (e) => {
+                if (stopRequested) return;
                 const typing = botMsgEl.querySelector('.typing');
                 if (typing) typing.remove();
                 const progress = botMsgEl.querySelector('.proc-wrap');
@@ -2851,9 +3551,14 @@
                 }
                 renderAnswerWithImages(answerEl, rawAnswerText, []);
                 es.close();
-                sendBtn.disabled = false;
+                activeEventSource = null;
+                activeTaskId = '';
+                activeBotMsgEl = null;
+                setQueryButton(false);
+                loadSessions();
             });
         } catch (e) {
+            if (stopRequested) return;
             const typing = botMsgEl.querySelector('.typing');
             if (typing) typing.remove();
             // 错误提示同样渲染到content区,保持Agent风格
@@ -2863,7 +3568,11 @@
             errEl.innerHTML = `<div class="answer-text"></div>`;
             errEl.querySelector('.answer-text').textContent = `请求失败：${e.message || e}`;
             contentEl.appendChild(errEl);
-            sendBtn.disabled = false;
+            activeEventSource = null;
+            activeTaskId = '';
+            activeBotMsgEl = null;
+            setQueryButton(false);
+            loadSessions();
         }
     }
 
@@ -2912,8 +3621,10 @@
         const eduImportStatus = document.getElementById('eduImportStatus');
         const eduCourseName = document.getElementById('eduCourseName');
         const eduQuestionName = document.getElementById('eduQuestionName');
+        const eduDeleteBtn = document.getElementById('eduDeleteBtn');
         let eduCourseFile = null;
         let eduQuestionFile = null;
+        let eduImportedSources = [];
         let educationCatalogMode = 'courses';
 
         async function loadEducationCatalog(mode = educationCatalogMode) {
@@ -3020,11 +3731,36 @@
                 });
                 const result = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(result.detail || '教育资料上传失败');
+                eduImportedSources = Array.isArray(result.sources) ? result.sources : [];
                 eduImportStatus.textContent = '已提交，正在解析和向量化…';
                 pollEducationImport(result.task_id);
             } catch (error) {
                 eduImportStatus.textContent = '导入失败：' + (error.message || error);
                 eduImportBtn.disabled = false;
+            }
+        });
+        eduDeleteBtn.addEventListener('click', async () => {
+            if (eduImportedSources.length === 0) {
+                alert('请先导入教育文件，再按本次导入的文件删除');
+                return;
+            }
+            const names = eduImportedSources.map(item => item.source_name || item.source_path).join('、');
+            if (!confirm(`确定删除本次导入的教育文件“${names}”吗？此操作无法恢复。`)) return;
+            eduDeleteBtn.disabled = true;
+            try {
+                let total = 0;
+                for (const item of eduImportedSources) {
+                    const result = await deleteKnowledgeDocument(item.document_id, item.source_name || '教育文件', false);
+                    total += result?.delete_count || 0;
+                }
+                alert(`已删除 ${total} 个知识切片`);
+                eduImportedSources = [];
+                loadEducationCatalog('courses');
+                loadEducationCatalog('questions');
+            } catch (error) {
+                alert('教育资料删除失败: ' + (error.message || error));
+            } finally {
+                eduDeleteBtn.disabled = false;
             }
         });
         loadEducationCatalog('courses');
@@ -3163,8 +3899,10 @@
         }
 
         async function uploadFile(file, refImages = []) {
-            const isPDF = file.name.toLowerCase().endsWith('.pdf');
-            const totalNodes = isPDF ? 8 : 7;
+            // ==================== AI修改 开始 ====================
+            // Graph Build 已加入导入链；PDF/DOCX 多一个解析节点，普通 Markdown 共 8 步。
+            // ==================== AI修改 结束 ====================
+            const totalNodes = /\.(pdf|docx)$/i.test(file.name) ? 9 : 8;
 
             const itemEl = createFileItem(file.name, (file.size / 1024).toFixed(2) + ' KB');
             const statusBadge = itemEl.querySelector('.status-badge');
@@ -3198,6 +3936,7 @@
 
                 const result = await response.json();
                 const taskId = result.task_id;
+                attachDocumentDelete(itemEl, result.document_id, file.name);
 
                 updateProgressUI(progressWrapper, uploadPercentage);
                 statusBadge.textContent = '处理中';
@@ -3220,17 +3959,14 @@
         // 本地文件夹导入: 把服务器本机的文件夹路径交给后端, 由后端扫磁盘完成
         // "找文档→解析md引用→自动配图片→导入"全流程, 前端只负责提交路径和轮询进度。
         // (浏览器安全沙箱不允许网页自己读磁盘文件, 所以图片配对必须由后端做)
-        const localDirInput = document.getElementById('localDirInput');
-        const localImportBtn = document.getElementById('localImportBtn');
+        async function startDirectoryImport(endpoint, dirInput, importBtn, emptyMessage, cardLabel) {
+            const dir = dirInput.value.trim();
+            if (!dir) { alert(emptyMessage); return; }
 
-        localImportBtn.addEventListener('click', async () => {
-            const dir = localDirInput.value.trim();
-            if (!dir) { alert('请先粘贴文件夹路径，例如 E:\\课程资料\\项目文档\\掌柜智库'); return; }
-
-            localImportBtn.disabled = true;
-            localImportBtn.textContent = '扫描中...';
+            importBtn.disabled = true;
+            importBtn.textContent = '扫描中...';
             try {
-                const resp = await fetch(`${API_BASE}/import_local`, {
+                const resp = await fetch(`${API_BASE}${endpoint}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ dir })
@@ -3239,9 +3975,12 @@
                 if (!resp.ok) throw new Error(result.detail || '导入失败，请检查路径和服务日志');
 
                 // 每个文档生成一个进度卡片, 复用与网页上传相同的轮询渲染
-                for (const t of result.tasks) {
-                    const totalNodes = t.filename.toLowerCase().endsWith('.pdf') ? 8 : 7;
-                    const itemEl = createFileItem(t.filename, `本地导入 · ${t.images}张图`);
+                for (const t of (result.tasks || [])) {
+                    // ==================== AI修改 开始 ====================
+                    // 目录导入与单文件上传保持同一套节点计数，避免进度条少算 Graph Build。
+                    // ==================== AI修改 结束 ====================
+                    const totalNodes = /\.(pdf|docx)$/i.test(t.filename) ? 9 : 8;
+                    const itemEl = createFileItem(t.filename, `${cardLabel} · ${t.images}张图`);
                     const statusBadge = itemEl.querySelector('.status-badge');
                     const progressWrapper = itemEl.querySelector('.progress-wrapper');
                     const logListEl = itemEl.querySelector('.log-list');
@@ -3249,17 +3988,246 @@
                     statusBadge.textContent = '排队中';
                     statusBadge.className = 'status-badge status-processing';
                     const li = document.createElement('li');
-                    li.textContent = `已提交本地导入(自动配对${t.images}张图片), 等待处理...`;
+                    li.textContent = `已提交${cardLabel}(自动配对${t.images}张图片), 等待处理...`;
                     li.className = 'log-running';
                     logListEl.appendChild(li);
+                    attachDocumentDelete(itemEl, t.document_id, t.source_path || t.filename);
                     pollStatus(t.task_id, itemEl, totalNodes);
                 }
-                localDirInput.value = '';
+                dirInput.value = '';
+                return result;
             } catch (e) {
-                alert('本地导入失败: ' + e.message);
+                alert(cardLabel + '失败: ' + e.message);
             } finally {
-                localImportBtn.disabled = false;
-                localImportBtn.textContent = '扫描导入';
+                importBtn.disabled = false;
+                importBtn.textContent = '扫描导入';
+            }
+        }
+
+        const localDirInput = document.getElementById('localDirInput');
+        const localImportBtn = document.getElementById('localImportBtn');
+        let currentDocumentDirectorySourceId = '';
+        localImportBtn.addEventListener('click', async () => {
+            const result = await startDirectoryImport(
+                '/import_local',
+                localDirInput,
+                localImportBtn,
+                '请先粘贴文件夹路径，例如 E:\\课程资料\\项目文档\\掌柜智库',
+                '本地导入'
+            );
+            currentDocumentDirectorySourceId = result?.source_id || '';
+        });
+
+        const documentDeleteBtn = document.getElementById('documentDeleteBtn');
+        documentDeleteBtn.addEventListener('click', async () => {
+            if (!currentDocumentDirectorySourceId) {
+                alert('请先导入一个本地目录，再删除当前目录');
+                return;
+            }
+            documentDeleteBtn.disabled = true;
+            try {
+                await deleteKnowledgeSource('document', currentDocumentDirectorySourceId, '当前本地目录');
+                currentDocumentDirectorySourceId = '';
+            } catch (error) {
+                alert('普通文档删除失败: ' + (error.message || error));
+            } finally {
+                documentDeleteBtn.disabled = false;
+            }
+        });
+
+        const obsidianDropZone = document.getElementById('obsidianDropZone');
+        const obsidianFileInput = document.getElementById('obsidianFileInput');
+        const obsidianFolderInput = document.getElementById('obsidianFolderInput');
+        const obsidianFolderBtn = document.getElementById('obsidianFolderBtn');
+        const obsidianUploadText = document.getElementById('obsidianUploadText');
+        const obsidianUploadSub = document.getElementById('obsidianUploadSub');
+        const obsidianVaultName = document.getElementById('obsidianVaultName');
+        const obsidianImportBtn = document.getElementById('obsidianImportBtn');
+        const obsidianDeleteBtn = document.getElementById('obsidianDeleteBtn');
+        let obsidianFiles = [];
+        let obsidianSourceId = '';
+
+        function readDirectoryEntries(reader) {
+            return new Promise((resolve, reject) => {
+                const entries = [];
+                const readBatch = () => reader.readEntries(batch => {
+                    if (!batch.length) {
+                        resolve(entries);
+                        return;
+                    }
+                    entries.push(...batch);
+                    readBatch();
+                }, reject);
+                readBatch();
+            });
+        }
+
+        function readFileEntry(entry, relativePath) {
+            return new Promise((resolve, reject) => {
+                entry.file(file => resolve({ file, path: relativePath }), reject);
+            });
+        }
+
+        async function collectDroppedObsidianFiles(dataTransfer) {
+            const entries = Array.from(dataTransfer.items || [])
+                .map(item => item.webkitGetAsEntry?.())
+                .filter(Boolean);
+            if (entries.length === 0) {
+                return Array.from(dataTransfer.files || []).map(file => ({
+                    file,
+                    path: file.webkitRelativePath || file.name,
+                }));
+            }
+
+            const collected = [];
+            async function walk(entry, prefix = '') {
+                const currentPath = prefix + entry.name;
+                if (entry.isFile) {
+                    collected.push(await readFileEntry(entry, currentPath));
+                    return;
+                }
+                if (!entry.isDirectory) return;
+                const children = await readDirectoryEntries(entry.createReader());
+                for (const child of children) await walk(child, currentPath + '/');
+            }
+            for (const entry of entries) await walk(entry);
+            return collected;
+        }
+
+        function setObsidianFiles(entries) {
+            const allowed = new Set(['md', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp']);
+            const selected = entries.filter(item => allowed.has(fileExt(item.path)));
+            const markdown = selected.filter(item => fileExt(item.path) === 'md');
+            if (markdown.length === 0) {
+                obsidianFiles = [];
+                obsidianImportBtn.disabled = true;
+                alert('请至少选择一个 .md 文件，图片会作为笔记附件一起上传');
+                return;
+            }
+
+            const roots = new Set(selected.map(item => {
+                const parts = item.path.split('/');
+                return parts.length > 1 ? parts[0] : 'DroppedVault';
+            }));
+            if (roots.size > 1) {
+                obsidianFiles = [];
+                obsidianImportBtn.disabled = true;
+                alert('一次只能上传一个 Obsidian Vault');
+                return;
+            }
+            const vaultName = roots.values().next().value || 'DroppedVault';
+            obsidianFiles = selected.map(item => {
+                const path = item.path.includes('/') ? item.path : `${vaultName}/${item.path}`;
+                return { file: item.file, path };
+            });
+            obsidianSourceId = `browser-upload:${vaultName}`;
+            obsidianVaultName.textContent = `${vaultName} · ${obsidianFiles.length} 个文件`;
+            obsidianUploadText.textContent = `已选择 ${obsidianFiles.length} 个文件`;
+            obsidianUploadSub.textContent = '可以继续重新选择，或点击上传导入';
+            obsidianImportBtn.disabled = false;
+        }
+
+        obsidianDropZone.addEventListener('click', event => {
+            if (event.target.closest('button')) return;
+            obsidianFileInput.click();
+        });
+        obsidianDropZone.addEventListener('dragover', event => {
+            event.preventDefault();
+            obsidianDropZone.style.borderColor = 'var(--accent)';
+            obsidianDropZone.style.background = 'var(--accent-soft)';
+        });
+        obsidianDropZone.addEventListener('dragleave', event => {
+            event.preventDefault();
+            obsidianDropZone.style.borderColor = '';
+            obsidianDropZone.style.background = '';
+        });
+        obsidianDropZone.addEventListener('drop', async event => {
+            event.preventDefault();
+            obsidianDropZone.style.borderColor = '';
+            obsidianDropZone.style.background = '';
+            try {
+                setObsidianFiles(await collectDroppedObsidianFiles(event.dataTransfer));
+            } catch (error) {
+                alert('读取拖拽文件失败: ' + (error.message || error));
+            }
+        });
+        obsidianFileInput.addEventListener('change', event => {
+            setObsidianFiles(Array.from(event.target.files || []).map(file => ({
+                file,
+                path: file.webkitRelativePath || file.name,
+            })));
+        });
+        obsidianFolderBtn.addEventListener('click', event => {
+            event.stopPropagation();
+            obsidianFolderInput.click();
+        });
+        obsidianFolderInput.addEventListener('change', event => {
+            setObsidianFiles(Array.from(event.target.files || []).map(file => ({
+                file,
+                path: file.webkitRelativePath || file.name,
+            })));
+        });
+        obsidianImportBtn.addEventListener('click', async () => {
+            if (!obsidianFiles.length) {
+                alert('请先选择或拖入 Obsidian 文件');
+                return;
+            }
+            obsidianImportBtn.disabled = true;
+            obsidianImportBtn.textContent = '上传中...';
+            try {
+                const formData = new FormData();
+                for (const item of obsidianFiles) formData.append('files', item.file, item.path);
+                const response = await fetch(`${API_BASE}/upload_obsidian`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result.detail || 'Obsidian Vault 上传失败');
+                obsidianSourceId = result.source_id || obsidianSourceId;
+                for (const t of (result.tasks || [])) {
+                    const itemEl = createFileItem(t.source_path || t.filename, `Obsidian 导入 · ${t.images}张图`);
+                    const statusBadge = itemEl.querySelector('.status-badge');
+                    const progressWrapper = itemEl.querySelector('.progress-wrapper');
+                    const logListEl = itemEl.querySelector('.log-list');
+                    progressWrapper.style.display = 'block';
+                    statusBadge.textContent = '排队中';
+                    statusBadge.className = 'status-badge status-processing';
+                    const li = document.createElement('li');
+                    li.textContent = `已上传 Obsidian 笔记(自动配对${t.images}张图片), 等待处理...`;
+                    li.className = 'log-running';
+                    logListEl.appendChild(li);
+                    attachDocumentDelete(itemEl, t.document_id, t.source_path || t.filename);
+                    // ==================== AI修改 开始 ====================
+                    // Obsidian Markdown 走 8 个节点：上传、入口、图片、切片、主体、向量、Milvus、图谱。
+                    // ==================== AI修改 结束 ====================
+                    pollStatus(t.task_id, itemEl, 8);
+                }
+                obsidianFiles = [];
+                obsidianFileInput.value = '';
+                obsidianFolderInput.value = '';
+                obsidianUploadText.textContent = '点击或拖拽 Vault 文件到此处';
+                obsidianUploadSub.textContent = '支持多选 Markdown 和图片 · 也可以直接拖入整个 Vault 文件夹';
+            } catch (error) {
+                alert('Obsidian 导入失败: ' + (error.message || error));
+                obsidianImportBtn.disabled = false;
+            } finally {
+                obsidianImportBtn.textContent = '上传导入';
+            }
+        });
+        obsidianDeleteBtn.addEventListener('click', async () => {
+            if (!obsidianSourceId) {
+                alert('请先选择并上传要删除的 Obsidian Vault');
+                return;
+            }
+            obsidianDeleteBtn.disabled = true;
+            try {
+                await deleteKnowledgeSource('obsidian', obsidianSourceId, '当前 Obsidian Vault');
+                obsidianSourceId = '';
+                obsidianVaultName.textContent = '未选择 Vault';
+            } catch (error) {
+                alert('Obsidian 资料删除失败: ' + (error.message || error));
+            } finally {
+                obsidianDeleteBtn.disabled = false;
             }
         });
         // ==================== AI修改 结束 ====================
@@ -3274,6 +4242,10 @@
             'node_item_name_recognition': '主体识别',
             'node_bge_embedding': '向量生成',
             'node_import_milvus': '写入向量库',
+            // ==================== AI修改 开始 ====================
+            // Graph Build 使用统一中文名称，避免前端兜底显示英文 graph build。
+            'node_graph_build': '构建知识图谱',
+            // ==================== AI修改 结束 ====================
             'node_test': '测试节点'
         };
         function nodeLabel(name) {

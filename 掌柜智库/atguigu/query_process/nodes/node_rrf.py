@@ -8,72 +8,113 @@ from atguigu.tool.logger import logger
 class NodeRrf(NodeBase):
     """
     节点功能：Reciprocal Rank Fusion
-    将多路召回的结果（向量、HyDE、Web）进行加权融合排序。
+    将向量、HyDE 和 Graph 三路召回结果进行加权融合排序。
     实现思路:
         1.获取多路召回的结果(普通搜索和假设搜索)
         2.给每一路设置权重
         3.遍历每一路,遍历每一路里面的每一个答案,将他们的评分按照RRF公式进行更新:s = s + w/(k+排名)
-        4.根据id判断二者是否存在重复搜索结果,多路同时召回即效果很好,分数直接相加
+        4.优先根据稳定 chunk_id 判断多路是否命中同一结果，分数直接相加
         5.最后根据分数再次进行排序
     """
 
     # 覆盖基类的 name 属性，标识节点名称
     name: str = "node_rrf"
 
+    def __init__(
+        self,
+        embedding_weight: float = 1.0,
+        hyde_weight: float = 0.8,
+        graph_weight: float = 1.5,
+        rrf_k: int = 60,
+    ):
+        super().__init__()
+        if embedding_weight < 0 or hyde_weight < 0 or graph_weight < 0:
+            raise ValueError("RRF 路由权重不能为负数")
+        if rrf_k < 0:
+            raise ValueError("RRF_K 不能为负数")
+        self.embedding_weight = embedding_weight
+        self.hyde_weight = hyde_weight
+        self.graph_weight = graph_weight
+        self.rrf_k = rrf_k
+
     def process(self, state: QueryGraphState):
         #校验数据
         embedding_chunks = state.get("embedding_chunks","")
         hyde_embedding_chunks = state.get("hyde_embedding_chunks","")
+        graph_chunks = state.get("graph_chunks", "")
         # ==================== AI修改 开始 ====================
         # 宽松校验：HyDE在课程/题目意图下被跳过返回空列表是正常情况
         # 只要有一路有结果就继续融合,两路都空才报错
         # 2026-08-20 改: 两路都空时不再 raise 整链崩溃(用户实测知识库数据缺失时
         # 直接报"倒排融合节点获取数据失败"错误), 改为降级返回空列表,
         # 让 answer_output 走"无结果"兜底分支, 给用户友好回复而不是报错。
-        if not embedding_chunks and not hyde_embedding_chunks:
+        if not embedding_chunks and not hyde_embedding_chunks and not graph_chunks:
             logger.warning("倒排融合节点: 两路检索均为空(可能知识库缺少该数据), 降级返回空结果")
             return {"rrf_chunks": []}
         # 过滤掉空的路,只融合有数据的多路
-        weight_embedding = [(chunks,1) for chunks in (embedding_chunks, hyde_embedding_chunks) if chunks]
+        weighted_chunks = [
+            ("vector", embedding_chunks, self.embedding_weight),
+            ("hyde", hyde_embedding_chunks, self.hyde_weight),
+            ("graph", graph_chunks, self.graph_weight),
+        ]
+        weighted_chunks = [
+            (route_name, chunks, weight)
+            for route_name, chunks, weight in weighted_chunks
+            if chunks and weight > 0
+        ]
         # ==================== AI修改 结束 ====================
 
         #倒排融合
         #逻辑:
             # 1. 遍历每一路的每一个chunk前提是已经排好名的chunk
             # 2. 保存每个chunk的id以及使用RRF公式进行计算RRF分数
-            # 3, 根据id判断多路召回死否存在重复,else里面将id 作为键,整个chunk作为值存入薪字典
+            # 3. 优先根据稳定 chunk_id 判断多路召回是否重复，并保留完整 Chunk
             # 4. 如果id重复,拿现有的RRF分数加上重复的RRF分数
-            # 5. 如果id不重复,拿RRF分数替换原分数添加到字典
+            # 5. 如果id不重复,保存原始分数并单独记录RRF分数
             # 6. 对新的字典取值并按RRF融合分数排序
         final_chunk_dict = {}
-        for chunks,weight in weight_embedding:
+        for route_name, chunks, weight in weighted_chunks:
             for idx,chunk in enumerate(chunks):
-                chunk_id = chunk.get("id","")
-                # ==================== AI修改 开始 ====================
-                # 修复伪RRF公式(提升召回质量):
-                # 原代码: chunk_score = chunk.get("score",0.0)+weight/(idx+60)
-                # 问题: 余弦相似度约0.75~0.95,RRF排名分约1/(60+rank)≈0.016,
-                #       两者量纲差了近两个数量级,直接相加后相似度完全主导,
-                #       chunk在哪一路排第几几乎不影响结果——
-                #       "多路投票"机制名存实亡,两路召回等于没融合。
-                # 修复: 标准RRF公式 s = Σ w/(k+rank),只看排名不看原始分。
-                #       排名是各路检索模型"投的票",两路都把同一chunk排前面,
-                #       它的融合分就高——这才是RRF的本意。
-                # 原始相似度另存sim_score字段保留,不影响rerank节点后续重算score
-                RRF_K = 60
-                chunk["sim_score"] = chunk.get("score", 0.0)
-                chunk_score = weight / (RRF_K + idx + 1)
-                # ==================== AI修改 结束 ====================
-                if chunk_id in final_chunk_dict:
-                    final_chunk_dict.get(chunk_id)["score"] += chunk_score
+                # 新 schema 的 chunk_id 是跨向量库和图数据库共享的稳定身份。
+                # 只有旧结果缺少 chunk_id 时才回退到 Milvus id，避免同一 Chunk
+                # 的 Graph 回溯结果和向量结果被当成两条候选。
+                stable_chunk_id = str(chunk.get("chunk_id") or "").strip()
+                if stable_chunk_id:
+                    chunk_key = ("chunk_id", stable_chunk_id)
+                elif chunk.get("id") is not None:
+                    chunk_key = ("legacy_id", str(chunk["id"]))
                 else:
-                    # chunk["score"] = chunk_score
-                    final_chunk_dict[chunk_id] = chunk
+                    # 缺少任何身份的异常结果不能把所有候选合并成一条。
+                    chunk_key = ("anonymous", route_name, idx)
+                original_score = chunk.get("score", 0.0)
+                chunk_score = weight / (self.rrf_k + idx + 1)
+                if chunk_key in final_chunk_dict:
+                    existing = final_chunk_dict[chunk_key]
+                    existing["rrf_score"] += chunk_score
+                    source = chunk.get("source") or route_name
+                    retrieval_sources = existing.setdefault("retrieval_sources", [])
+                    if source not in retrieval_sources:
+                        retrieval_sources.append(source)
+                    if chunk.get("graph_path"):
+                        graph_paths = existing.setdefault("graph_path", [])
+                        for path in chunk["graph_path"]:
+                            if path not in graph_paths:
+                                graph_paths.append(path)
+                else:
+                    merged_chunk = dict(chunk)
+                    merged_chunk["sim_score"] = original_score
+                    merged_chunk["rrf_score"] = chunk_score
+                    merged_chunk["retrieval_sources"] = [
+                        chunk.get("source") or route_name
+                    ]
+                    final_chunk_dict[chunk_key] = merged_chunk
 
-                    final_chunk_dict.get(chunk_id)["score"] = chunk_score
 
-
-        rrf_chunks = sorted(final_chunk_dict.values(), key=lambda x: x["score"], reverse=True)
+        rrf_chunks = sorted(
+            final_chunk_dict.values(),
+            key=lambda x: x["rrf_score"],
+            reverse=True,
+        )
         # ==================== AI修改 开始 ====================
         # 原Question: 为什么图片里面的摘要和url都没了?
         # 答案: 摘要和url并没有丢。图片处理节点(node_md_img)在导入时已把md里的

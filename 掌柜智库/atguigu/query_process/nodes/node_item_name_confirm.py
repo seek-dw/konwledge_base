@@ -19,11 +19,16 @@ class NodeItemNameConfirm(NodeBase):
     """
     节点功能：确认用户问题中的核心商品名称
     实现思路:
-        1.获取最近的20条历史会话记录,整理成一个字符串
-        2.交给大模型进行产品名称确认,并重写用户问题
-        3.将大模型返回的产品名称确认向量化并匹配主体识别向量库进行混合检索
-        4.拿到原始商品名称,模型确认商品名称,以及匹配的分数,根据是否存在,以及分数大小,决定是否替换用户问题中的商品名称
-        5.如果替换,在历史记录中更新意图识别以及问题重写
+        1. 保存本轮用户问题到 MongoDB
+        2. 获取最近 HISTORY_LIMIT 条历史
+        3. 判断是否属于“关于历史对话本身”的元问题
+        4. LLM 进行意图识别 + 主体识别 + 问题改写
+        5. 如果是闲聊 → 直接返回 chitchat
+        6. 如果识别出了主体 → 对主体进行 Milvus 软匹配
+        7. score >= 0.5 的标准主体全部作为过滤条件
+        8. 如果没有匹配到 ≥0.5 的主体 → 不加主体过滤，允许全库检索
+        9. 本轮历史只回填当前 message_id
+        10. 返回 query_type / rewritten_query / item_names 等状态
     """
 
     # 覆盖基类的 name 属性，标识节点名称
@@ -89,8 +94,11 @@ class NodeItemNameConfirm(NodeBase):
         # 1) 输出query_type意图类型 2) JSON解析失败降级为chitchat而不是raise 3) LLM调用失败也降级
         query_type, item_name_list, rewritten_query = self.send_to_llm_and_parse_item_name(history_content, original_query)
 
-        # 闲聊短路：不是知识库问题，或识别不出任何主体，直接走聊天分支，不检索不走向量
-        if query_type == "chitchat" or not item_name_list and query_type not in ("course", "question"):
+        # ==================== AI修改 开始 ====================
+        # 只有模型明确判定为闲聊才跳过检索；knowledge/doc 没有主体时仍走宽泛检索。
+        # 否则“数据库连接失败怎么排查”这类问题会因没有产品名而被误当闲聊。
+        if query_type == "chitchat":
+        # ==================== AI修改 结束 ====================
             return {
                 "message_id": message_id,          # 反馈信息的id
                 "original_query": original_query,  # 原始问题
@@ -106,13 +114,13 @@ class NodeItemNameConfirm(NodeBase):
 
         # 三.意图识别item_name匹配混合搜索主体识别,拿到{意图item_name,主体item_name,匹配分数}
         # ==================== AI修改 开始 ====================
-        # 全意图永不拦截修复: 用户反馈"说说fastapi"被"请确认您要咨询的商品是xxx"卡断
-        # 原因: doc/knowledge意图走align_and_filter_for_distance严格对齐,主体库里
-        # 只有课程系列名/题库名,匹配不上技术名词就触发确认/无法识别的拦截分支
-        # 修复: 所有意图统一软匹配(分数>=0.5采纳作为过滤条件,匹配不上就不加过滤
+        # 所有意图统一软匹配(分数>=0.5采纳作为过滤条件,匹配不上就不加过滤
         # 走全库自由检索),让检索和重排去决定相关性,绝不拦截用户
+        # answer永远为空,代表一定会走检索分支
         if item_name_list:
+            # llm识别出来的意图去milvus里面进行向量搜索返回一个列表
             all_searched_item_name_list = self.item_match_and_get_all_search_item_list(item_name_list)
+            # 软匹配,只留下分数高于0.5的匹配结果
             matched = [item.get("search_item_name") for item in all_searched_item_name_list
                        if item.get("score", 0.0) >= 0.5]
             final_item_names = list(dict.fromkeys(matched))  # 去重保序
@@ -196,9 +204,11 @@ class NodeItemNameConfirm(NodeBase):
         except json.JSONDecodeError:
             pass
         # 兜底：正则抓取第一个 {...} JSON对象(不管前后有什么废话都能抓到)
+        # [\s\S]匹配空白字符或者非空白字符,比.多一个换行,所有任意都能匹配
         match = re.search(r"\{[\s\S]*\}", text)
         if match:
             try:
+                # group(0)代表整个匹配到的字符串,group(1)表示()捕获的
                 return json.loads(match.group(0))
             except json.JSONDecodeError:
                 return None
@@ -304,41 +314,42 @@ class NodeItemNameConfirm(NodeBase):
             all_searched_item_name_list.extend(search_item_names)
         return all_searched_item_name_list
 
-    def align_and_filter_for_distance(self, all_searched_item_name_list: list[Any]) -> tuple[str, list[Any]]:
-        # 拿到所有意图识别的匹配item_name以及评分,接下来对齐过滤
-        # 确定没问题的搜索结果,可以直接用
-        confirm_item_names = [
-            item.get("search_item_name") for item in all_searched_item_name_list
-            if item.get("score") >= 0.8
-        ]
-        # 模糊结果,得分不高不低,需要用户确认
-        option_item_names = [
-            item.get("search_item_name") for item in all_searched_item_name_list
-            if item.get("score") >= 0.5 and item.get("score") < 0.8
-        ]
-        # 如果存在则赋值给最终的item_name
-        if confirm_item_names:
-            final_item_names = confirm_item_names
-            answer = ""
-        elif option_item_names:
-            # ==================== AI修改 开始 ====================
-            # 原question: 这里item为啥为空?只能为空?
-            # 答案与改进: 不是只能为空。原设计置空是为了"先确认再检索"的保守策略,
-            # 但置空意味着本轮完全不检索,用户必须再回一句才能拿到东西,体验割裂。
-            # 改进: 直接把模糊候选放进final_item_names,检索时对所有候选同时过滤,
-            # 用户确认的同时下一轮已经能拿到相关内容,确认与检索并行不冲突
-            # (注: 当前主流程已改用统一软匹配,此方法保留作为兼容备用)
-            final_item_names = option_item_names
-            answer = f"请确认您要咨询的商品是哪一个{','.join(option_item_names)}"
-        else:
-            final_item_names = []
-            answer = "无法识别您咨询的问题,请重新提问"
-
-        # 判断answer有没有值来处理历史记录
-        # 如果answer有值,则代表向用户反馈了信息,则会存在历史记录,要添加历史记录
-        # 如果没有,则证明意图识别匹配到了高分答案,直接输出,不添加历史记录
-        # 不管有没有,最好都要重新更新item_names和rewritten_query
-        return answer, final_item_names
+    # 旧的对齐逻辑,现在直接改版成answer永远为空,宽泛检索,意图识别到闲聊自动到输出节点
+    # def align_and_filter_for_distance(self, all_searched_item_name_list: list[Any]) -> tuple[str, list[Any]]:
+    #     # 拿到所有意图识别的匹配item_name以及评分,接下来对齐过滤
+    #     # 确定没问题的搜索结果,可以直接用
+    #     confirm_item_names = [
+    #         item.get("search_item_name") for item in all_searched_item_name_list
+    #         if item.get("score") >= 0.8
+    #     ]
+    #     # 模糊结果,得分不高不低,需要用户确认
+    #     option_item_names = [
+    #         item.get("search_item_name") for item in all_searched_item_name_list
+    #         if item.get("score") >= 0.5 and item.get("score") < 0.8
+    #     ]
+    #     # 如果存在则赋值给最终的item_name
+    #     if confirm_item_names:
+    #         final_item_names = confirm_item_names
+    #         answer = ""
+    #     elif option_item_names:
+    #         # ==================== AI修改 开始 ====================
+    #         # 原question: 这里item为啥为空?只能为空?
+    #         # 答案与改进: 不是只能为空。原设计置空是为了"先确认再检索"的保守策略,
+    #         # 但置空意味着本轮完全不检索,用户必须再回一句才能拿到东西,体验割裂。
+    #         # 改进: 直接把模糊候选放进final_item_names,检索时对所有候选同时过滤,
+    #         # 用户确认的同时下一轮已经能拿到相关内容,确认与检索并行不冲突
+    #         # (注: 当前主流程已改用统一软匹配,此方法保留作为兼容备用)
+    #         final_item_names = option_item_names
+    #         answer = f"请确认您要咨询的商品是哪一个{','.join(option_item_names)}"
+    #     else:
+    #         final_item_names = []
+    #         answer = "无法识别您咨询的问题,请重新提问"
+    #
+    #     # 判断answer有没有值来处理历史记录
+    #     # 如果answer有值,则代表向用户反馈了信息,则会存在历史记录,要添加历史记录
+    #     # 如果没有,则证明意图识别匹配到了高分答案,直接输出,不添加历史记录
+    #     # 不管有没有,最好都要重新更新item_names和rewritten_query
+    #     return answer, final_item_names
 
     def judge_answer_and_backfill_history(self, answer: str, final_item_names: list[Any], message_id, rewritten_query,session_id) -> Any:
         if answer:
@@ -348,6 +359,7 @@ class NodeItemNameConfirm(NodeBase):
         # 原QUESTION: 查询20条历史记录,为啥取20条?这样回填不会污染历史?为什么不是根据message_id更新
         # 已修复: 1)20条抽成HISTORY_LIMIT常量(见类属性,附选型理由)
         # 2)回填从"批量覆盖最近20条"改为只更新本轮message_id,彻底消灭历史污染
+        # 只回填当前问题的主体名称和重写问题,避免了历史污染
         if message_id:
             update_item_names_and_rewritten_query([message_id], item_names=final_item_names, rewritten_query=rewritten_query)
         # ==================== AI修改 结束 ====================
